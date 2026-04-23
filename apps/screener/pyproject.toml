@@ -1,0 +1,17 @@
+[project]
+name = "polymarket-screener"
+version = "0.1.0"
+description = "MVP-0 Polymarket screener with Telegram alerts."
+requires-python = ">=3.11"
+dependencies = [
+]
+
+[project.scripts]
+screener = "screener.main:run"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/screener"]

@@ -1,0 +1,13 @@
+[project]
+name = "postgres-mcp"
+version = "0.1.0"
+description = "Read-only MCP server for project Postgres inspection and diagnostics."
+requires-python = ">=3.11"
+dependencies = [
+    "mcp",
+    "psycopg[binary]>=3.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

@@ -1,0 +1,13 @@
+[project]
+name = "redis-mcp"
+version = "0.1.0"
+description = "Read-only MCP server for Redis inspection and queue diagnostics."
+requires-python = ">=3.11"
+dependencies = [
+    "mcp",
+    "redis>=5.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

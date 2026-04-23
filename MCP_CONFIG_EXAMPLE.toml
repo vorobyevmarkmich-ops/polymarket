@@ -1,0 +1,46 @@
+# Example Codex MCP configuration for this project.
+# Copy the relevant sections into ~/.codex/config.toml and adjust environment values.
+
+[mcp_servers.knowledge]
+command = "uv"
+args = [
+  "--directory",
+  "/Users/markvorobev/Documents/Codex/Pumpfun/mcp/knowledge-mcp",
+  "run",
+  "server.py",
+]
+
+[mcp_servers.postgres]
+command = "uv"
+args = [
+  "--directory",
+  "/Users/markvorobev/Documents/Codex/Pumpfun/mcp/postgres-mcp",
+  "run",
+  "server.py",
+]
+env = { POSTGRES_MCP_DSN = "postgresql://user:password@host:5432/dbname" }
+
+[mcp_servers.redis]
+command = "uv"
+args = [
+  "--directory",
+  "/Users/markvorobev/Documents/Codex/Pumpfun/mcp/redis-mcp",
+  "run",
+  "server.py",
+]
+env = { REDIS_MCP_URL = "redis://localhost:6379/0" }
+
+# Hosted Supabase MCP example.
+# Replace YOUR_PROJECT_REF with your actual Supabase project ref.
+# Prefer read_only=true and project scoping.
+
+[mcp_servers.supabase]
+url = "https://mcp.supabase.com/mcp?project_ref=YOUR_PROJECT_REF&read_only=true"
+
+# Local Snyk MCP example.
+# Snyk MCP is local-only and runs through the Snyk CLI.
+# Install Snyk CLI first and authenticate with `snyk auth`.
+
+[mcp_servers.snyk]
+command = "snyk"
+args = ["mcp", "-t", "stdio"]
