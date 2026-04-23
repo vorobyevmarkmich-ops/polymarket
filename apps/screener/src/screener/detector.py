@@ -15,6 +15,7 @@ class OpportunityDetector:
         self,
         markets: list[Market],
         prices: dict[str, PriceLevel],
+        fee_rates: dict[str, int],
     ) -> list[Opportunity]:
         opportunities: list[Opportunity] = []
         now = utc_now()
@@ -29,7 +30,13 @@ class OpportunityDetector:
                 continue
 
             total_cost = yes.ask_price + no.ask_price
-            spread = Decimal("1") - total_cost
+            gross_spread = Decimal("1") - total_cost
+            yes_fee_rate_bps = fee_rates.get(market.yes_token_id, 0) if market.fees_enabled else 0
+            no_fee_rate_bps = fee_rates.get(market.no_token_id, 0) if market.fees_enabled else 0
+            yes_fee = self._fee_for_price(yes.ask_price, yes_fee_rate_bps)
+            no_fee = self._fee_for_price(no.ask_price, no_fee_rate_bps)
+            total_fees = yes_fee + no_fee
+            spread = gross_spread - total_fees
             estimated_size_usd = market.liquidity
 
             if spread < Decimal(str(self.settings.min_spread)):
@@ -43,10 +50,23 @@ class OpportunityDetector:
                     yes_ask=yes.ask_price,
                     no_ask=no.ask_price,
                     total_cost=total_cost,
+                    yes_fee=yes_fee,
+                    no_fee=no_fee,
+                    total_fees=total_fees,
+                    gross_spread=gross_spread,
                     spread=spread,
                     estimated_size_usd=estimated_size_usd,
                     detected_at=now,
+                    yes_fee_rate_bps=yes_fee_rate_bps,
+                    no_fee_rate_bps=no_fee_rate_bps,
                 )
             )
 
         return sorted(opportunities, key=lambda item: item.spread, reverse=True)
+
+    @staticmethod
+    def _fee_for_price(price: Decimal, fee_rate_bps: int) -> Decimal:
+        # Polymarket's fee-rate endpoint returns the same integer used as
+        # feeRateBps in orders. Docs fee tables imply feeRate = value / 1000.
+        fee_rate = Decimal(fee_rate_bps) / Decimal("1000")
+        return fee_rate * price * (Decimal("1") - price)

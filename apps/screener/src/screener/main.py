@@ -31,6 +31,7 @@ class ScreenerApp:
         self.telegram = TelegramNotifier(self.settings)
         self._stop = asyncio.Event()
         self._markets: list[Market] = []
+        self._fee_rates: dict[str, int] = {}
         self._next_discovery_at = 0.0
         self._cycle_count = 0
         self._next_alert_at = 0.0
@@ -72,10 +73,20 @@ class ScreenerApp:
 
         if force_discovery or not self._markets or started_at >= self._next_discovery_at:
             self._markets = await self.polymarket.discover_markets()
+            fee_token_ids = []
+            for market in self._markets:
+                if market.fees_enabled:
+                    fee_token_ids.extend([market.yes_token_id, market.no_token_id])
+            self._fee_rates = await self.polymarket.fetch_fee_rates(fee_token_ids)
             self.storage.upsert_markets(self._markets)
             self._next_discovery_at = started_at + self.settings.market_discovery_interval_seconds
             discovery_ran = True
-            LOGGER.info("Discovered %s active markets", len(self._markets))
+            LOGGER.info(
+                "Discovered %s active markets, fee_enabled=%s, fee_rates=%s",
+                len(self._markets),
+                sum(1 for market in self._markets if market.fees_enabled),
+                len(self._fee_rates),
+            )
             self._log_market_samples()
 
         token_ids: list[str] = []
@@ -83,7 +94,7 @@ class ScreenerApp:
             token_ids.extend([market.yes_token_id, market.no_token_id])
 
         prices = await self.polymarket.fetch_ask_prices(token_ids)
-        opportunities = self.detector.detect(self._markets, prices)
+        opportunities = self.detector.detect(self._markets, prices, self._fee_rates)
         elapsed_ms = int((time.monotonic() - started_at) * 1000)
         LOGGER.info(
             "Scan cycle #%s markets=%s tokens=%s prices=%s opportunities=%s discovery=%s elapsed_ms=%s",
@@ -163,7 +174,13 @@ class ScreenerApp:
                 continue
 
             total_cost = yes.ask_price + no.ask_price
-            spread = Decimal("1") - total_cost
+            gross_spread = Decimal("1") - total_cost
+            yes_fee_rate_bps = self._fee_rates.get(market.yes_token_id, 0) if market.fees_enabled else 0
+            no_fee_rate_bps = self._fee_rates.get(market.no_token_id, 0) if market.fees_enabled else 0
+            yes_fee = self._fee_for_price(yes.ask_price, yes_fee_rate_bps)
+            no_fee = self._fee_for_price(no.ask_price, no_fee_rate_bps)
+            total_fees = yes_fee + no_fee
+            spread = gross_spread - total_fees
             if spread < min_spread or spread >= profitable_min_spread:
                 continue
 
@@ -172,9 +189,15 @@ class ScreenerApp:
                 yes_ask=yes.ask_price,
                 no_ask=no.ask_price,
                 total_cost=total_cost,
+                yes_fee=yes_fee,
+                no_fee=no_fee,
+                total_fees=total_fees,
+                gross_spread=gross_spread,
                 spread=spread,
                 estimated_size_usd=market.liquidity,
                 detected_at=utc_now(),
+                yes_fee_rate_bps=yes_fee_rate_bps,
+                no_fee_rate_bps=no_fee_rate_bps,
             )
             if best is None or candidate.spread > best.spread:
                 best = candidate
@@ -221,25 +244,35 @@ class ScreenerApp:
                 continue
 
             total_cost = yes.ask_price + no.ask_price
-            spread = Decimal("1") - total_cost
+            gross_spread = Decimal("1") - total_cost
+            yes_fee_rate_bps = self._fee_rates.get(market.yes_token_id, 0) if market.fees_enabled else 0
+            no_fee_rate_bps = self._fee_rates.get(market.no_token_id, 0) if market.fees_enabled else 0
+            spread = gross_spread - self._fee_for_price(yes.ask_price, yes_fee_rate_bps)
+            spread -= self._fee_for_price(no.ask_price, no_fee_rate_bps)
             candidates.append((total_cost, spread, market, yes, no))
 
-        candidates.sort(key=lambda item: item[0])
+        candidates.sort(key=lambda item: item[1], reverse=True)
         for index, (total_cost, spread, market, yes, no) in enumerate(
             candidates[: self.settings.log_top_candidates_limit],
             start=1,
         ):
             LOGGER.info(
-                "Closest candidate #%s total=%s spread_bps=%s yes_ask=%s no_ask=%s liquidity=%s market=%s question=%s",
+                "Closest candidate #%s total=%s net_spread_bps=%s yes_ask=%s no_ask=%s fees_enabled=%s liquidity=%s market=%s question=%s",
                 index,
                 total_cost,
                 spread * Decimal("10000"),
                 yes.ask_price,
                 no.ask_price,
+                market.fees_enabled,
                 market.liquidity,
                 market.id,
                 market.question[:140],
             )
+
+    @staticmethod
+    def _fee_for_price(price: Decimal, fee_rate_bps: int) -> Decimal:
+        fee_rate = Decimal(fee_rate_bps) / Decimal("1000")
+        return fee_rate * price * (Decimal("1") - price)
 
 
 async def async_main() -> None:

@@ -19,6 +19,8 @@ class Market:
     no_token_id: str
     liquidity: Decimal
     volume: Decimal
+    fees_enabled: bool
+    fee_type: str | None
     accepting_orders: bool
     active: bool
     closed: bool
@@ -38,13 +40,23 @@ class Opportunity:
     yes_ask: Decimal
     no_ask: Decimal
     total_cost: Decimal
+    yes_fee: Decimal
+    no_fee: Decimal
+    total_fees: Decimal
+    gross_spread: Decimal
     spread: Decimal
     estimated_size_usd: Decimal
     detected_at: datetime
+    yes_fee_rate_bps: int = 0
+    no_fee_rate_bps: int = 0
 
     @property
     def spread_bps(self) -> int:
         return int(self.spread * Decimal("10000"))
+
+    @property
+    def gross_spread_bps(self) -> int:
+        return int(self.gross_spread * Decimal("10000"))
 
     @property
     def key(self) -> str:

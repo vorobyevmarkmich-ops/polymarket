@@ -30,6 +30,8 @@ class Storage:
               no_token_id text not null,
               liquidity text not null,
               volume text not null,
+              fees_enabled integer not null default 0,
+              fee_type text,
               accepting_orders integer not null,
               active integer not null,
               closed integer not null,
@@ -60,7 +62,15 @@ class Storage:
             );
             """
         )
+        self._ensure_column("markets", "fees_enabled", "integer not null default 0")
+        self._ensure_column("markets", "fee_type", "text")
         self._conn.commit()
+
+    def _ensure_column(self, table: str, column: str, definition: str) -> None:
+        columns = self._conn.execute(f"pragma table_info({table})").fetchall()
+        if any(row["name"] == column for row in columns):
+            return
+        self._conn.execute(f"alter table {table} add column {column} {definition}")
 
     def upsert_markets(self, markets: list[Market]) -> None:
         rows = [
@@ -73,6 +83,8 @@ class Storage:
                 market.no_token_id,
                 str(market.liquidity),
                 str(market.volume),
+                int(market.fees_enabled),
+                market.fee_type,
                 int(market.accepting_orders),
                 int(market.active),
                 int(market.closed),
@@ -85,9 +97,9 @@ class Storage:
             """
             insert into markets (
               id, question, slug, url, yes_token_id, no_token_id, liquidity, volume,
-              accepting_orders, active, closed, updated_at, seen_at
+              fees_enabled, fee_type, accepting_orders, active, closed, updated_at, seen_at
             )
-            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
             on conflict(id) do update set
               question = excluded.question,
               slug = excluded.slug,
@@ -96,6 +108,8 @@ class Storage:
               no_token_id = excluded.no_token_id,
               liquidity = excluded.liquidity,
               volume = excluded.volume,
+              fees_enabled = excluded.fees_enabled,
+              fee_type = excluded.fee_type,
               accepting_orders = excluded.accepting_orders,
               active = excluded.active,
               closed = excluded.closed,

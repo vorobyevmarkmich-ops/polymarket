@@ -20,7 +20,7 @@ DIAGNOSTIC_ALERT_INTERVAL_SECONDS=300
 POLYMARKET_GAMMA_API_BASE=https://gamma-api.polymarket.com
 POLYMARKET_CLOB_API_BASE=https://clob.polymarket.com
 DATABASE_URL=sqlite:///./screener.sqlite3
-MIN_SPREAD_BPS=50
+MIN_SPREAD_BPS=1
 MIN_SIZE_USD=10
 ACTIVE_MARKET_SCAN_INTERVAL_SECONDS=2
 MARKET_DISCOVERY_INTERVAL_SECONDS=60
@@ -44,7 +44,9 @@ TELEGRAM_DISABLE_WEB_PAGE_PREVIEW=true
 
 - The worker does not execute trades.
 - The worker does not accept deposits or withdrawals.
-- Keep `MIN_SPREAD_BPS` positive for real signals. Use `DIAGNOSTIC_ALERTS_ENABLED=true` for near-miss smoke-test messages instead of lowering the main threshold.
+- Keep `MIN_SPREAD_BPS` positive for real signals. It is applied to net spread after estimated Polymarket taker fees.
+- The screener fetches CLOB fee rates dynamically and estimates `net_spread = 1 - yes_ask - no_ask - yes_fee - no_fee`.
+- Use `DIAGNOSTIC_ALERTS_ENABLED=true` for near-miss smoke-test messages instead of lowering the main threshold.
 - `MAX_ALERTS_PER_CYCLE` and `ALERT_MIN_INTERVAL_SECONDS` protect Telegram from alert floods.
 - `DIAGNOSTIC_ALERT_INTERVAL_SECONDS` controls how often the best near-miss candidate can be sent.
 - With `LOG_TOP_CANDIDATES=true`, logs include the closest markets by `YES ask + NO ask`, so it is visible why a cycle did or did not produce a signal.

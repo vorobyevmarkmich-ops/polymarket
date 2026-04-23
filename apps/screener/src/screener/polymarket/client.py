@@ -38,6 +38,7 @@ def _json_list(value: Any) -> list[Any]:
 class PolymarketClient:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self._fee_rate_cache: dict[str, int] = {}
 
     async def close(self) -> None:
         return None
@@ -90,6 +91,28 @@ class PolymarketClient:
                 )
 
         return prices
+
+    async def fetch_fee_rates(self, token_ids: list[str]) -> dict[str, int]:
+        unique_token_ids = list(dict.fromkeys(token_ids))
+        rates: dict[str, int] = {}
+
+        for token_id in unique_token_ids:
+            if token_id not in self._fee_rate_cache:
+                self._fee_rate_cache[token_id] = await self._fetch_fee_rate(token_id)
+            rates[token_id] = self._fee_rate_cache[token_id]
+
+        return rates
+
+    async def _fetch_fee_rate(self, token_id: str) -> int:
+        url = f"{self.settings.polymarket_clob_api_base.rstrip('/')}/fee-rate"
+        try:
+            data = await self._get_json(f"{url}?{urlencode({'token_id': token_id})}")
+        except Exception:
+            LOGGER.exception("Failed to fetch fee rate for token_id=%s", token_id)
+            return 0
+        if not isinstance(data, dict):
+            return 0
+        return int(_decimal(data.get("base_fee")))
 
     async def _fetch_markets_page(self, limit: int, offset: int) -> list[dict[str, Any]]:
         url = f"{self.settings.polymarket_gamma_api_base.rstrip('/')}/markets"
@@ -163,6 +186,8 @@ class PolymarketClient:
             no_token_id=token_ids[no_index],
             liquidity=_decimal(raw.get("liquidityNum") or raw.get("liquidity")),
             volume=_decimal(raw.get("volumeNum") or raw.get("volume")),
+            fees_enabled=bool(raw.get("feesEnabled")),
+            fee_type=raw.get("feeType"),
             accepting_orders=bool(raw.get("acceptingOrders")),
             active=bool(raw.get("active")),
             closed=bool(raw.get("closed")),
