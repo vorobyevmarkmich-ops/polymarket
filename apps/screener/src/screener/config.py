@@ -47,6 +47,7 @@ class Settings:
         self.telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
         self.telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
         self.telegram_disable_web_page_preview = _bool("TELEGRAM_DISABLE_WEB_PAGE_PREVIEW", True)
+        self.diagnostic_alerts_enabled = _bool("DIAGNOSTIC_ALERTS_ENABLED", False)
         self.log_market_samples = _bool("LOG_MARKET_SAMPLES", True)
         self.log_top_candidates = _bool("LOG_TOP_CANDIDATES", True)
 
@@ -71,6 +72,8 @@ class Settings:
         self.alert_cooldown_seconds = _int("ALERT_COOLDOWN_SECONDS", 300)
         self.alert_min_interval_seconds = _float("ALERT_MIN_INTERVAL_SECONDS", 0)
         self.max_alerts_per_cycle = max(1, _int("MAX_ALERTS_PER_CYCLE", 3))
+        self.diagnostic_min_spread_bps = _int("DIAGNOSTIC_MIN_SPREAD_BPS", -10)
+        self.diagnostic_alert_interval_seconds = _float("DIAGNOSTIC_ALERT_INTERVAL_SECONDS", 300)
         self.max_price_staleness_seconds = _int("MAX_PRICE_STALENESS_SECONDS", 5)
 
         self.gamma_page_limit = max(1, min(_int("GAMMA_PAGE_LIMIT", 200), 1000))
