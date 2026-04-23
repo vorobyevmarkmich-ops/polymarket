@@ -10,7 +10,7 @@ from decimal import Decimal
 
 from screener.config import load_settings
 from screener.detector import OpportunityDetector
-from screener.models import Market, Opportunity, PriceLevel, utc_now
+from screener.models import Market, PriceLevel
 from screener.polymarket.client import PolymarketClient
 from screener.storage import Storage
 from screener.telegram import TelegramNotifier
@@ -35,14 +35,13 @@ class ScreenerApp:
         self._next_discovery_at = 0.0
         self._cycle_count = 0
         self._next_alert_at = 0.0
-        self._next_diagnostic_alert_at = 0.0
 
     async def run(self) -> None:
         self.storage.init()
         LOGGER.info("Starting Polymarket screener MVP-0")
         LOGGER.info("Telegram enabled: %s", self.settings.telegram_enabled)
         LOGGER.info(
-            "Config scan_interval=%ss discovery_interval=%ss min_spread_bps=%s min_size_usd=%s max_markets=%s batch_size=%s max_alerts_per_cycle=%s alert_min_interval=%ss diagnostic_alerts=%s diagnostic_min_spread_bps=%s diagnostic_interval=%ss log_top_candidates=%s",
+            "Config scan_interval=%ss discovery_interval=%ss min_spread_bps=%s min_size_usd=%s max_markets=%s batch_size=%s max_alerts_per_cycle=%s alert_min_interval=%ss log_top_candidates=%s",
             self.settings.active_market_scan_interval_seconds,
             self.settings.market_discovery_interval_seconds,
             self.settings.min_spread_bps,
@@ -51,9 +50,6 @@ class ScreenerApp:
             self.settings.clob_price_batch_size,
             self.settings.max_alerts_per_cycle,
             self.settings.alert_min_interval_seconds,
-            self.settings.diagnostic_alerts_enabled,
-            self.settings.diagnostic_min_spread_bps,
-            self.settings.diagnostic_alert_interval_seconds,
             self.settings.log_top_candidates,
         )
 
@@ -107,7 +103,6 @@ class ScreenerApp:
             elapsed_ms,
         )
         self._log_top_candidates(prices)
-        await self._maybe_send_diagnostic_alert(prices, opportunities)
 
         alerts_sent = 0
         for opportunity in opportunities:
@@ -131,78 +126,6 @@ class ScreenerApp:
                 opportunity.market.id,
                 opportunity.spread_bps,
             )
-
-    async def _maybe_send_diagnostic_alert(
-        self,
-        prices: dict[str, PriceLevel],
-        opportunities: list[Opportunity],
-    ) -> None:
-        if not self.settings.diagnostic_alerts_enabled:
-            return
-        if opportunities:
-            return
-        if time.monotonic() < self._next_diagnostic_alert_at:
-            return
-
-        candidate = self._find_best_diagnostic_candidate(prices)
-        if candidate is None:
-            return
-
-        await self.telegram.send_opportunity(candidate)
-        self.storage.mark_alert_sent(candidate)
-        self._next_diagnostic_alert_at = (
-            time.monotonic() + self.settings.diagnostic_alert_interval_seconds
-        )
-        LOGGER.info(
-            "Diagnostic alert sent for market=%s spread_bps=%s",
-            candidate.market.id,
-            candidate.spread_bps,
-        )
-
-    def _find_best_diagnostic_candidate(
-        self,
-        prices: dict[str, PriceLevel],
-    ) -> Opportunity | None:
-        min_spread = Decimal(self.settings.diagnostic_min_spread_bps) / Decimal("10000")
-        profitable_min_spread = Decimal(str(self.settings.min_spread))
-        best: Opportunity | None = None
-
-        for market in self._markets:
-            yes = prices.get(market.yes_token_id)
-            no = prices.get(market.no_token_id)
-            if yes is None or no is None:
-                continue
-
-            total_cost = yes.ask_price + no.ask_price
-            gross_spread = Decimal("1") - total_cost
-            yes_fee_rate_bps = self._fee_rates.get(market.yes_token_id, 0) if market.fees_enabled else 0
-            no_fee_rate_bps = self._fee_rates.get(market.no_token_id, 0) if market.fees_enabled else 0
-            yes_fee = self._fee_for_price(yes.ask_price, yes_fee_rate_bps)
-            no_fee = self._fee_for_price(no.ask_price, no_fee_rate_bps)
-            total_fees = yes_fee + no_fee
-            spread = gross_spread - total_fees
-            if spread < min_spread or spread >= profitable_min_spread:
-                continue
-
-            candidate = Opportunity(
-                market=market,
-                yes_ask=yes.ask_price,
-                no_ask=no.ask_price,
-                total_cost=total_cost,
-                yes_fee=yes_fee,
-                no_fee=no_fee,
-                total_fees=total_fees,
-                gross_spread=gross_spread,
-                spread=spread,
-                estimated_size_usd=market.liquidity,
-                detected_at=utc_now(),
-                yes_fee_rate_bps=yes_fee_rate_bps,
-                no_fee_rate_bps=no_fee_rate_bps,
-            )
-            if best is None or candidate.spread > best.spread:
-                best = candidate
-
-        return best
 
     async def close(self) -> None:
         await self.polymarket.close()

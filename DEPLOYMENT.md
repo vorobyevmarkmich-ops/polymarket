@@ -14,9 +14,6 @@ This project is prepared to run the MVP-0 Polymarket screener as a Railway worke
 ```bash
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
-DIAGNOSTIC_ALERTS_ENABLED=false
-DIAGNOSTIC_MIN_SPREAD_BPS=-10
-DIAGNOSTIC_ALERT_INTERVAL_SECONDS=300
 POLYMARKET_GAMMA_API_BASE=https://gamma-api.polymarket.com
 POLYMARKET_CLOB_API_BASE=https://clob.polymarket.com
 DATABASE_URL=sqlite:///./screener.sqlite3
@@ -46,9 +43,7 @@ TELEGRAM_DISABLE_WEB_PAGE_PREVIEW=true
 - The worker does not accept deposits or withdrawals.
 - Keep `MIN_SPREAD_BPS` positive for real signals. It is applied to net spread after estimated Polymarket taker fees.
 - The screener fetches CLOB fee rates dynamically and estimates `net_spread = 1 - yes_ask - no_ask - yes_fee - no_fee`.
-- Use `DIAGNOSTIC_ALERTS_ENABLED=true` for near-miss smoke-test messages instead of lowering the main threshold.
 - `MAX_ALERTS_PER_CYCLE` and `ALERT_MIN_INTERVAL_SECONDS` protect Telegram from alert floods.
-- `DIAGNOSTIC_ALERT_INTERVAL_SECONDS` controls how often the best near-miss candidate can be sent.
 - With `LOG_TOP_CANDIDATES=true`, logs include the closest markets by `YES ask + NO ask`, so it is visible why a cycle did or did not produce a signal.
 - SQLite is acceptable for the first smoke deployment, but Railway filesystem persistence may be ephemeral. Move to Postgres after initial validation.
 - Keep secrets in Railway Variables only. Do not commit `.env`.
