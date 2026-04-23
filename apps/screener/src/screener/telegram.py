@@ -70,7 +70,7 @@ class TelegramNotifier:
                 f"<b>Net spread:</b> {opportunity.spread_bps / 100:.2f}%",
                 f"<b>Fee rates:</b> YES {opportunity.yes_fee_rate_bps}, NO {opportunity.no_fee_rate_bps}",
                 f"<b>Estimated size:</b> ${opportunity.estimated_size_usd}",
-                f"<b>Estimated profit:</b> ${opportunity.spread * opportunity.estimated_size_usd:.2f}",
+                f"<b>Rough profit estimate:</b> ${opportunity.spread * opportunity.estimated_size_usd:.2f}",
                 f"<b>Liquidity:</b> ${market.liquidity}",
                 "",
                 f"<b>URL:</b> {html.escape(market.url)}",
