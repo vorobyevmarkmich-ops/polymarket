@@ -69,6 +69,8 @@ class Settings:
         )
         self.market_discovery_interval_seconds = _float("MARKET_DISCOVERY_INTERVAL_SECONDS", 60)
         self.alert_cooldown_seconds = _int("ALERT_COOLDOWN_SECONDS", 300)
+        self.alert_min_interval_seconds = _float("ALERT_MIN_INTERVAL_SECONDS", 0)
+        self.max_alerts_per_cycle = max(1, _int("MAX_ALERTS_PER_CYCLE", 3))
         self.max_price_staleness_seconds = _int("MAX_PRICE_STALENESS_SECONDS", 5)
 
         self.gamma_page_limit = max(1, min(_int("GAMMA_PAGE_LIMIT", 200), 1000))

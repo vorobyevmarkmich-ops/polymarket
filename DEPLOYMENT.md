@@ -22,6 +22,8 @@ MIN_SIZE_USD=10
 ACTIVE_MARKET_SCAN_INTERVAL_SECONDS=2
 MARKET_DISCOVERY_INTERVAL_SECONDS=60
 ALERT_COOLDOWN_SECONDS=300
+ALERT_MIN_INTERVAL_SECONDS=0
+MAX_ALERTS_PER_CYCLE=3
 MAX_PRICE_STALENESS_SECONDS=5
 GAMMA_PAGE_LIMIT=200
 MAX_MARKETS_PER_DISCOVERY=1000
@@ -39,6 +41,8 @@ TELEGRAM_DISABLE_WEB_PAGE_PREVIEW=true
 
 - The worker does not execute trades.
 - The worker does not accept deposits or withdrawals.
+- `MIN_SPREAD_BPS` can be lowered for smoke testing. Negative values produce diagnostic near-miss alerts, not profitable arbitrage signals.
+- `MAX_ALERTS_PER_CYCLE` and `ALERT_MIN_INTERVAL_SECONDS` protect Telegram from alert floods.
 - With `LOG_TOP_CANDIDATES=true`, logs include the closest markets by `YES ask + NO ask`, so it is visible why a cycle did or did not produce a signal.
 - SQLite is acceptable for the first smoke deployment, but Railway filesystem persistence may be ephemeral. Move to Postgres after initial validation.
 - Keep secrets in Railway Variables only. Do not commit `.env`.

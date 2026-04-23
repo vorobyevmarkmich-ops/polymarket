@@ -33,19 +33,22 @@ class ScreenerApp:
         self._markets: list[Market] = []
         self._next_discovery_at = 0.0
         self._cycle_count = 0
+        self._next_alert_at = 0.0
 
     async def run(self) -> None:
         self.storage.init()
         LOGGER.info("Starting Polymarket screener MVP-0")
         LOGGER.info("Telegram enabled: %s", self.settings.telegram_enabled)
         LOGGER.info(
-            "Config scan_interval=%ss discovery_interval=%ss min_spread_bps=%s min_size_usd=%s max_markets=%s batch_size=%s log_top_candidates=%s",
+            "Config scan_interval=%ss discovery_interval=%ss min_spread_bps=%s min_size_usd=%s max_markets=%s batch_size=%s max_alerts_per_cycle=%s alert_min_interval=%ss log_top_candidates=%s",
             self.settings.active_market_scan_interval_seconds,
             self.settings.market_discovery_interval_seconds,
             self.settings.min_spread_bps,
             self.settings.min_size_usd,
             self.settings.max_markets_per_discovery,
             self.settings.clob_price_batch_size,
+            self.settings.max_alerts_per_cycle,
+            self.settings.alert_min_interval_seconds,
             self.settings.log_top_candidates,
         )
 
@@ -90,8 +93,13 @@ class ScreenerApp:
         )
         self._log_top_candidates(prices)
 
+        alerts_sent = 0
         for opportunity in opportunities:
             self.storage.save_opportunity(opportunity)
+            if alerts_sent >= self.settings.max_alerts_per_cycle:
+                continue
+            if time.monotonic() < self._next_alert_at:
+                continue
             if not self.storage.should_alert(
                 opportunity,
                 cooldown_seconds=self.settings.alert_cooldown_seconds,
@@ -100,6 +108,8 @@ class ScreenerApp:
 
             await self.telegram.send_opportunity(opportunity)
             self.storage.mark_alert_sent(opportunity)
+            alerts_sent += 1
+            self._next_alert_at = time.monotonic() + self.settings.alert_min_interval_seconds
             LOGGER.info(
                 "Alert sent for market=%s spread_bps=%s",
                 opportunity.market.id,

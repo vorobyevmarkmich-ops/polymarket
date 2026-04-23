@@ -46,9 +46,20 @@ class TelegramNotifier:
 
     def format_opportunity(self, opportunity: Opportunity) -> str:
         market = opportunity.market
+        is_positive = opportunity.spread > 0
+        title = (
+            "New Polymarket opportunity"
+            if is_positive
+            else "Diagnostic near-miss signal"
+        )
+        note = (
+            "Signal only. Not guaranteed profit. No auto-execution."
+            if is_positive
+            else "Diagnostic only: current spread is not profitable. No auto-execution."
+        )
         return "\n".join(
             [
-                "<b>New Polymarket opportunity</b>",
+                f"<b>{title}</b>",
                 "",
                 f"<b>Market:</b> {html.escape(market.question)}",
                 f"<b>YES ask:</b> {opportunity.yes_ask}",
@@ -61,6 +72,6 @@ class TelegramNotifier:
                 f"<b>URL:</b> {html.escape(market.url)}",
                 f"<b>Detected:</b> {opportunity.detected_at.isoformat()}",
                 "",
-                "Signal only. Not guaranteed profit. No auto-execution.",
+                note,
             ]
         )
