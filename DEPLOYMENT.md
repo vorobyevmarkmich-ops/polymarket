@@ -29,6 +29,9 @@ CLOB_PRICE_BATCH_SIZE=250
 LOG_LEVEL=INFO
 LOG_MARKET_SAMPLES=true
 LOG_MARKET_SAMPLE_SIZE=5
+LOG_TOP_CANDIDATES=true
+LOG_TOP_CANDIDATES_LIMIT=5
+LOG_TOP_CANDIDATES_EVERY_CYCLES=6
 TELEGRAM_DISABLE_WEB_PAGE_PREVIEW=true
 ```
 
@@ -36,5 +39,6 @@ TELEGRAM_DISABLE_WEB_PAGE_PREVIEW=true
 
 - The worker does not execute trades.
 - The worker does not accept deposits or withdrawals.
+- With `LOG_TOP_CANDIDATES=true`, logs include the closest markets by `YES ask + NO ask`, so it is visible why a cycle did or did not produce a signal.
 - SQLite is acceptable for the first smoke deployment, but Railway filesystem persistence may be ephemeral. Move to Postgres after initial validation.
 - Keep secrets in Railway Variables only. Do not commit `.env`.

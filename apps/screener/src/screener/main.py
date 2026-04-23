@@ -6,10 +6,11 @@ import signal
 import sys
 import time
 from contextlib import suppress
+from decimal import Decimal
 
 from screener.config import load_settings
 from screener.detector import OpportunityDetector
-from screener.models import Market
+from screener.models import Market, PriceLevel
 from screener.polymarket.client import PolymarketClient
 from screener.storage import Storage
 from screener.telegram import TelegramNotifier
@@ -38,13 +39,14 @@ class ScreenerApp:
         LOGGER.info("Starting Polymarket screener MVP-0")
         LOGGER.info("Telegram enabled: %s", self.settings.telegram_enabled)
         LOGGER.info(
-            "Config scan_interval=%ss discovery_interval=%ss min_spread_bps=%s min_size_usd=%s max_markets=%s batch_size=%s",
+            "Config scan_interval=%ss discovery_interval=%ss min_spread_bps=%s min_size_usd=%s max_markets=%s batch_size=%s log_top_candidates=%s",
             self.settings.active_market_scan_interval_seconds,
             self.settings.market_discovery_interval_seconds,
             self.settings.min_spread_bps,
             self.settings.min_size_usd,
             self.settings.max_markets_per_discovery,
             self.settings.clob_price_batch_size,
+            self.settings.log_top_candidates,
         )
 
         while not self._stop.is_set():
@@ -86,6 +88,7 @@ class ScreenerApp:
             discovery_ran,
             elapsed_ms,
         )
+        self._log_top_candidates(prices)
 
         for opportunity in opportunities:
             self.storage.save_opportunity(opportunity)
@@ -126,6 +129,40 @@ class ScreenerApp:
                 index,
                 market.id,
                 market.liquidity,
+                market.question[:140],
+            )
+
+    def _log_top_candidates(self, prices: dict[str, PriceLevel]) -> None:
+        if not self.settings.log_top_candidates or self.settings.log_top_candidates_limit <= 0:
+            return
+        if self._cycle_count % self.settings.log_top_candidates_every_cycles != 0:
+            return
+
+        candidates: list[tuple[Decimal, Decimal, Market, PriceLevel, PriceLevel]] = []
+        for market in self._markets:
+            yes = prices.get(market.yes_token_id)
+            no = prices.get(market.no_token_id)
+            if yes is None or no is None:
+                continue
+
+            total_cost = yes.ask_price + no.ask_price
+            spread = Decimal("1") - total_cost
+            candidates.append((total_cost, spread, market, yes, no))
+
+        candidates.sort(key=lambda item: item[0])
+        for index, (total_cost, spread, market, yes, no) in enumerate(
+            candidates[: self.settings.log_top_candidates_limit],
+            start=1,
+        ):
+            LOGGER.info(
+                "Closest candidate #%s total=%s spread_bps=%s yes_ask=%s no_ask=%s liquidity=%s market=%s question=%s",
+                index,
+                total_cost,
+                spread * Decimal("10000"),
+                yes.ask_price,
+                no.ask_price,
+                market.liquidity,
+                market.id,
                 market.question[:140],
             )
 

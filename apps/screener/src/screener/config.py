@@ -48,6 +48,7 @@ class Settings:
         self.telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
         self.telegram_disable_web_page_preview = _bool("TELEGRAM_DISABLE_WEB_PAGE_PREVIEW", True)
         self.log_market_samples = _bool("LOG_MARKET_SAMPLES", True)
+        self.log_top_candidates = _bool("LOG_TOP_CANDIDATES", True)
 
         self.polymarket_gamma_api_base = os.getenv(
             "POLYMARKET_GAMMA_API_BASE",
@@ -74,6 +75,8 @@ class Settings:
         self.max_markets_per_discovery = max(1, _int("MAX_MARKETS_PER_DISCOVERY", 1000))
         self.clob_price_batch_size = max(1, min(_int("CLOB_PRICE_BATCH_SIZE", 250), 500))
         self.log_market_sample_size = max(0, min(_int("LOG_MARKET_SAMPLE_SIZE", 5), 20))
+        self.log_top_candidates_limit = max(0, min(_int("LOG_TOP_CANDIDATES_LIMIT", 5), 20))
+        self.log_top_candidates_every_cycles = max(1, _int("LOG_TOP_CANDIDATES_EVERY_CYCLES", 6))
         self.log_level = os.getenv("LOG_LEVEL", "INFO")
 
     @property

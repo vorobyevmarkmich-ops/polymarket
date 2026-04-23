@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from decimal import Decimal
 
 from screener.config import Settings
@@ -16,11 +17,15 @@ class OpportunityDetector:
         prices: dict[str, PriceLevel],
     ) -> list[Opportunity]:
         opportunities: list[Opportunity] = []
+        now = utc_now()
+        max_age = timedelta(seconds=self.settings.max_price_staleness_seconds)
 
         for market in markets:
             yes = prices.get(market.yes_token_id)
             no = prices.get(market.no_token_id)
             if yes is None or no is None:
+                continue
+            if now - yes.observed_at > max_age or now - no.observed_at > max_age:
                 continue
 
             total_cost = yes.ask_price + no.ask_price
@@ -40,7 +45,7 @@ class OpportunityDetector:
                     total_cost=total_cost,
                     spread=spread,
                     estimated_size_usd=estimated_size_usd,
-                    detected_at=utc_now(),
+                    detected_at=now,
                 )
             )
 
