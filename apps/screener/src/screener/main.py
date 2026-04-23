@@ -31,11 +31,21 @@ class ScreenerApp:
         self._stop = asyncio.Event()
         self._markets: list[Market] = []
         self._next_discovery_at = 0.0
+        self._cycle_count = 0
 
     async def run(self) -> None:
         self.storage.init()
         LOGGER.info("Starting Polymarket screener MVP-0")
         LOGGER.info("Telegram enabled: %s", self.settings.telegram_enabled)
+        LOGGER.info(
+            "Config scan_interval=%ss discovery_interval=%ss min_spread_bps=%s min_size_usd=%s max_markets=%s batch_size=%s",
+            self.settings.active_market_scan_interval_seconds,
+            self.settings.market_discovery_interval_seconds,
+            self.settings.min_spread_bps,
+            self.settings.min_size_usd,
+            self.settings.max_markets_per_discovery,
+            self.settings.clob_price_batch_size,
+        )
 
         while not self._stop.is_set():
             try:
@@ -47,12 +57,17 @@ class ScreenerApp:
         await self.close()
 
     async def scan_once(self, force_discovery: bool = False) -> None:
-        now = time.monotonic()
-        if force_discovery or not self._markets or now >= self._next_discovery_at:
+        started_at = time.monotonic()
+        self._cycle_count += 1
+        discovery_ran = False
+
+        if force_discovery or not self._markets or started_at >= self._next_discovery_at:
             self._markets = await self.polymarket.discover_markets()
             self.storage.upsert_markets(self._markets)
-            self._next_discovery_at = now + self.settings.market_discovery_interval_seconds
+            self._next_discovery_at = started_at + self.settings.market_discovery_interval_seconds
+            discovery_ran = True
             LOGGER.info("Discovered %s active markets", len(self._markets))
+            self._log_market_samples()
 
         token_ids: list[str] = []
         for market in self._markets:
@@ -60,7 +75,17 @@ class ScreenerApp:
 
         prices = await self.polymarket.fetch_ask_prices(token_ids)
         opportunities = self.detector.detect(self._markets, prices)
-        LOGGER.info("Detected %s opportunities", len(opportunities))
+        elapsed_ms = int((time.monotonic() - started_at) * 1000)
+        LOGGER.info(
+            "Scan cycle #%s markets=%s tokens=%s prices=%s opportunities=%s discovery=%s elapsed_ms=%s",
+            self._cycle_count,
+            len(self._markets),
+            len(token_ids),
+            len(prices),
+            len(opportunities),
+            discovery_ran,
+            elapsed_ms,
+        )
 
         for opportunity in opportunities:
             self.storage.save_opportunity(opportunity)
@@ -89,6 +114,20 @@ class ScreenerApp:
     async def _sleep_or_stop(self, seconds: float) -> None:
         with suppress(asyncio.TimeoutError):
             await asyncio.wait_for(self._stop.wait(), timeout=seconds)
+
+    def _log_market_samples(self) -> None:
+        if not self.settings.log_market_samples or self.settings.log_market_sample_size <= 0:
+            return
+
+        sample = self._markets[: self.settings.log_market_sample_size]
+        for index, market in enumerate(sample, start=1):
+            LOGGER.info(
+                "Market sample #%s id=%s liquidity=%s question=%s",
+                index,
+                market.id,
+                market.liquidity,
+                market.question[:140],
+            )
 
 
 async def async_main() -> None:
