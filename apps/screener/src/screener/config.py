@@ -72,7 +72,7 @@ class Settings:
         self.min_size_usd = _float("MIN_SIZE_USD", 10)
         self.active_market_scan_interval_seconds = _float(
             "ACTIVE_MARKET_SCAN_INTERVAL_SECONDS",
-            2,
+            120,
         )
         self.market_discovery_interval_seconds = _float("MARKET_DISCOVERY_INTERVAL_SECONDS", 60)
         self.alert_cooldown_seconds = _int("ALERT_COOLDOWN_SECONDS", 300)
@@ -105,7 +105,7 @@ class Settings:
         self.log_cross_venue_rejections = _bool("LOG_CROSS_VENUE_REJECTIONS", True)
 
         self.implication_max_markets = max(1, _int("IMPLICATION_MAX_MARKETS", 250))
-        self.implication_max_candidates = max(1, _int("IMPLICATION_MAX_CANDIDATES", 50))
+        self.implication_max_candidates = max(1, _int("IMPLICATION_MAX_CANDIDATES", 10))
         self.implication_min_match_score = _float("IMPLICATION_MIN_MATCH_SCORE", 0.18)
         self.implication_min_anchor_yes_bps = _int("IMPLICATION_MIN_ANCHOR_YES_BPS", 9500)
         self.implication_min_edge_bps = _int("IMPLICATION_MIN_EDGE_BPS", 500)
