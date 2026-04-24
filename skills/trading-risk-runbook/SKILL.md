@@ -16,12 +16,13 @@ Use this skill when the task affects operational safety or money-moving correctn
 
 ## What this skill is for
 
-- risk controls
-- reconciliation
+- semantic mismatch risk controls
+- venue/API degradation handling
+- reconciliation later
 - incident handling
 - alert design
 - admin safety features
-- operational guardrails for deposits, withdrawals, and trading
+- operational guardrails for matching, opportunities and later trading
 
 ## Critical principles
 
@@ -30,11 +31,15 @@ Use this skill when the task affects operational safety or money-moving correctn
 - Every critical workflow must be observable.
 - There must be a path to pause trading globally.
 - Manual recovery and audit review must be possible.
+- AI output must be treated as advisory until verified.
 
 ## Minimum controls to preserve
 
 - `global pause`
 - `kill switch`
+- semantic match status and confidence
+- deterministic rule verification
+- manual review for ambiguous pairs
 - idempotency for deposit / withdrawal flows
 - audit log for sensitive admin actions
 - explicit `risk_events`
@@ -43,6 +48,10 @@ Use this skill when the task affects operational safety or money-moving correctn
 
 ## Alert categories
 
+- semantic match confidence drop
+- high mismatch rejection rate
+- stale orderbook data
+- venue API degradation
 - fill rate drop
 - latency spike
 - failed deposits
@@ -55,6 +64,8 @@ Use this skill when the task affects operational safety or money-moving correctn
 ## When changing trading or money logic
 
 - Ask whether the change can:
+  - treat a near match as exact
+  - ignore a material resolution-rule difference
   - create double-processing
   - desync internal and external state
   - hide a failed execution

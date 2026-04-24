@@ -9,7 +9,10 @@ from contextlib import suppress
 from decimal import Decimal
 
 from screener.config import load_settings
+from screener.cross_venue import CrossVenueDetector, SemanticMatcher
 from screener.detector import OpportunityDetector
+from screener.implications import ImplicationDetector, ImplicationMatcher
+from screener.kalshi import KalshiClient
 from screener.models import Market, PriceLevel
 from screener.polymarket.client import PolymarketClient
 from screener.storage import Storage
@@ -27,6 +30,8 @@ class ScreenerApp:
         )
         self.polymarket = PolymarketClient(self.settings)
         self.detector = OpportunityDetector(self.settings)
+        self.implication_matcher = ImplicationMatcher(self.settings)
+        self.implication_detector = ImplicationDetector(self.settings)
         self.storage = Storage(self.settings.database_url)
         self.telegram = TelegramNotifier(self.settings)
         self._stop = asyncio.Event()
@@ -51,6 +56,15 @@ class ScreenerApp:
             self.settings.max_alerts_per_cycle,
             self.settings.alert_min_interval_seconds,
             self.settings.log_top_candidates,
+        )
+        LOGGER.info(
+            "Implication scanner enabled via --implications: max_markets=%s max_candidates=%s min_anchor_yes_bps=%s min_edge_bps=%s buffer_bps=%s openai_matcher=%s",
+            self.settings.implication_max_markets,
+            self.settings.implication_max_candidates,
+            self.settings.implication_min_anchor_yes_bps,
+            self.settings.implication_min_edge_bps,
+            self.settings.implication_buffer_bps,
+            bool(self.settings.use_openai_matcher and self.settings.openai_api_key),
         )
 
         while not self._stop.is_set():
@@ -91,14 +105,16 @@ class ScreenerApp:
 
         prices = await self.polymarket.fetch_ask_prices(token_ids)
         opportunities = self.detector.detect(self._markets, prices, self._fee_rates)
+        implication_opportunities = await self._scan_implications(prices) if "--implications" in sys.argv else []
         elapsed_ms = int((time.monotonic() - started_at) * 1000)
         LOGGER.info(
-            "Scan cycle #%s markets=%s tokens=%s prices=%s opportunities=%s discovery=%s elapsed_ms=%s",
+            "Scan cycle #%s markets=%s tokens=%s prices=%s opportunities=%s implication_opportunities=%s discovery=%s elapsed_ms=%s",
             self._cycle_count,
             len(self._markets),
             len(token_ids),
             len(prices),
             len(opportunities),
+            len(implication_opportunities),
             discovery_ran,
             elapsed_ms,
         )
@@ -125,6 +141,71 @@ class ScreenerApp:
                 "Alert sent for market=%s spread_bps=%s",
                 opportunity.market.id,
                 opportunity.spread_bps,
+            )
+
+    async def _scan_implications(self, prices: dict[str, PriceLevel]) -> list:
+        markets = sorted(
+            self._markets,
+            key=lambda market: (market.volume, market.liquidity),
+            reverse=True,
+        )[: self.settings.implication_max_markets]
+        LOGGER.info("stage=implication_matching_start markets=%s", len(markets))
+        candidates = self.implication_matcher.find_candidates(markets)
+        LOGGER.info("stage=implication_matching_done candidates=%s", len(candidates))
+        self._log_implication_candidates(candidates, prices)
+        opportunities = self.implication_detector.detect(candidates, prices)
+        LOGGER.info("stage=implication_detection_done opportunities=%s", len(opportunities))
+        for opportunity in opportunities[: self.settings.max_alerts_per_cycle]:
+            self.storage.save_implication_opportunity(opportunity)
+            LOGGER.info(
+                "stage=implication_opportunity net_edge_bps=%s anchor_yes=%s consequence_yes=%s relation=%s score=%.3f premise=%s consequence=%s reason=%s",
+                opportunity.net_edge_bps,
+                opportunity.premise_yes_price,
+                opportunity.consequence_yes_ask,
+                opportunity.candidate.relation_type,
+                opportunity.candidate.score,
+                opportunity.candidate.premise.question[:140],
+                opportunity.candidate.consequence.question[:140],
+                opportunity.candidate.reason[:300],
+            )
+            if time.monotonic() < self._next_alert_at:
+                continue
+            alert_market_id = (
+                f"implication:{opportunity.candidate.premise.id}:"
+                f"{opportunity.candidate.consequence.id}"
+            )
+            if not self.storage.should_alert_key(
+                alert_market_id,
+                cooldown_seconds=self.settings.alert_cooldown_seconds,
+            ):
+                continue
+            await self.telegram.send_implication_opportunity(opportunity)
+            self.storage.mark_alert_key(opportunity.key, alert_market_id)
+            self._next_alert_at = time.monotonic() + self.settings.alert_min_interval_seconds
+            LOGGER.info(
+                "stage=implication_alert_sent net_edge_bps=%s premise_id=%s consequence_id=%s",
+                opportunity.net_edge_bps,
+                opportunity.candidate.premise.id,
+                opportunity.candidate.consequence.id,
+            )
+        return opportunities
+
+    def _log_implication_candidates(self, candidates: list, prices: dict[str, PriceLevel]) -> None:
+        if not self.settings.log_implication_candidates:
+            return
+        for index, candidate in enumerate(candidates[: self.settings.log_top_candidates_limit], start=1):
+            premise_yes = prices.get(candidate.premise.yes_token_id)
+            consequence_yes = prices.get(candidate.consequence.yes_token_id)
+            LOGGER.info(
+                "stage=implication_candidate index=%s score=%.3f relation=%s anchor_yes=%s consequence_yes=%s premise=%s consequence=%s reason=%s",
+                index,
+                candidate.score,
+                candidate.relation_type,
+                premise_yes.ask_price if premise_yes else None,
+                consequence_yes.ask_price if consequence_yes else None,
+                candidate.premise.question[:140],
+                candidate.consequence.question[:140],
+                candidate.reason[:300],
             )
 
     async def close(self) -> None:
@@ -198,15 +279,332 @@ class ScreenerApp:
         return fee_rate * price * (Decimal("1") - price)
 
 
+class CrossVenueScreenerApp:
+    def __init__(self) -> None:
+        self.settings = load_settings()
+        logging.basicConfig(
+            level=getattr(logging, self.settings.log_level.upper(), logging.INFO),
+            format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        )
+        self.polymarket = PolymarketClient(self.settings)
+        self.kalshi = KalshiClient(self.settings)
+        self.matcher = SemanticMatcher(self.settings)
+        self.detector = CrossVenueDetector(self.settings)
+        self.implication_matcher = ImplicationMatcher(self.settings)
+        self.implication_detector = ImplicationDetector(self.settings)
+        self.storage = Storage(self.settings.database_url)
+        self.telegram = TelegramNotifier(self.settings)
+        self._stop = asyncio.Event()
+        self._cycle_count = 0
+        self._next_alert_at = 0.0
+
+    async def run(self) -> None:
+        self.storage.init()
+        LOGGER.info("Starting cross-venue screener MVP-0")
+        LOGGER.info("Telegram enabled: %s", self.settings.telegram_enabled)
+        LOGGER.info(
+            "Config venues=Polymarket,Kalshi kalshi_limit=%s poly_limit=%s kalshi_scan_limit=%s max_candidates=%s min_match_score=%s min_net_edge_bps=%s openai_matcher=%s model=%s",
+            self.settings.kalshi_market_limit,
+            self.settings.cross_venue_max_polymarket_markets,
+            self.settings.cross_venue_max_kalshi_markets,
+            self.settings.cross_venue_max_candidates,
+            self.settings.cross_venue_min_match_score,
+            self.settings.cross_venue_min_net_edge_bps,
+            bool(self.settings.use_openai_matcher and self.settings.openai_api_key),
+            self.settings.openai_model,
+        )
+        if "--implications" in sys.argv:
+            LOGGER.info(
+                "Implication scanner enabled: max_markets=%s max_candidates=%s min_anchor_yes_bps=%s min_edge_bps=%s buffer_bps=%s",
+                self.settings.implication_max_markets,
+                self.settings.implication_max_candidates,
+                self.settings.implication_min_anchor_yes_bps,
+                self.settings.implication_min_edge_bps,
+                self.settings.implication_buffer_bps,
+            )
+        while not self._stop.is_set():
+            try:
+                await self.scan_once()
+            except Exception:
+                LOGGER.exception("Cross-venue scan cycle failed")
+            await self._sleep_or_stop(self.settings.active_market_scan_interval_seconds)
+        await self.close()
+
+    async def scan_once(self) -> None:
+        started_at = time.monotonic()
+        self._cycle_count += 1
+        LOGGER.info("stage=cycle_start cycle=%s", self._cycle_count)
+
+        LOGGER.info("stage=discovery_start venue=polymarket")
+        polymarket_markets = await self.polymarket.discover_markets()
+        polymarket_markets = sorted(
+            polymarket_markets,
+            key=lambda market: (market.volume, market.liquidity),
+            reverse=True,
+        )[: self.settings.cross_venue_max_polymarket_markets]
+        LOGGER.info("stage=discovery_done venue=polymarket markets=%s", len(polymarket_markets))
+        self._log_polymarket_samples(polymarket_markets)
+
+        LOGGER.info("stage=discovery_start venue=kalshi")
+        kalshi_markets = await self.kalshi.discover_markets()
+        kalshi_markets = sorted(
+            kalshi_markets,
+            key=lambda market: (market.volume, market.liquidity),
+            reverse=True,
+        )[: self.settings.cross_venue_max_kalshi_markets]
+        LOGGER.info("stage=discovery_done venue=kalshi markets=%s", len(kalshi_markets))
+        self._log_kalshi_samples(kalshi_markets)
+
+        self.storage.upsert_markets(polymarket_markets)
+
+        LOGGER.info("stage=matching_start poly_markets=%s kalshi_markets=%s", len(polymarket_markets), len(kalshi_markets))
+        candidates = self.matcher.find_candidates(polymarket_markets, kalshi_markets)
+        LOGGER.info("stage=matching_done candidates=%s", len(candidates))
+        self._log_match_candidates(candidates)
+
+        token_ids: list[str] = []
+        for candidate in candidates:
+            token_ids.extend([candidate.polymarket.yes_token_id, candidate.polymarket.no_token_id])
+        if "--implications" in sys.argv:
+            for market in polymarket_markets[: self.settings.implication_max_markets]:
+                token_ids.extend([market.yes_token_id, market.no_token_id])
+        LOGGER.info("stage=pricing_start polymarket_tokens=%s", len(set(token_ids)))
+        prices = await self.polymarket.fetch_ask_prices(token_ids)
+        LOGGER.info("stage=pricing_done polymarket_prices=%s kalshi_prices=%s", len(prices), len(kalshi_markets) * 2)
+
+        LOGGER.info("stage=opportunity_detection_start candidates=%s", len(candidates))
+        all_direction_count = len(candidates) * 2
+        opportunities = self.detector.detect(candidates, prices)
+        LOGGER.info(
+            "stage=opportunity_detection_done candidate_directions=%s opportunities=%s",
+            all_direction_count,
+            len(opportunities),
+        )
+        self._log_opportunity_rejections(candidates, prices)
+
+        for opportunity in opportunities[: self.settings.max_alerts_per_cycle]:
+            self.storage.save_cross_venue_opportunity(opportunity)
+            LOGGER.info(
+                "stage=opportunity direction=%s net_edge_bps=%s total=%s yes=%s:%s no=%s:%s match=%s score=%.3f poly=%s kalshi=%s reason=%s",
+                opportunity.direction,
+                opportunity.net_edge_bps,
+                opportunity.total_cost,
+                opportunity.buy_yes_venue,
+                opportunity.buy_yes_price,
+                opportunity.buy_no_venue,
+                opportunity.buy_no_price,
+                opportunity.candidate.match_type,
+                opportunity.candidate.score,
+                opportunity.candidate.polymarket.question[:140],
+                opportunity.candidate.kalshi.title[:140],
+                opportunity.candidate.reason[:300],
+            )
+            if time.monotonic() < self._next_alert_at:
+                continue
+            alert_market_id = (
+                f"cross-venue:{opportunity.candidate.polymarket.id}:"
+                f"{opportunity.candidate.kalshi.ticker}:{opportunity.direction}"
+            )
+            if not self.storage.should_alert_key(
+                alert_market_id,
+                cooldown_seconds=self.settings.alert_cooldown_seconds,
+            ):
+                continue
+            await self.telegram.send_cross_venue_opportunity(opportunity)
+            self.storage.mark_alert_key(opportunity.key, alert_market_id)
+            self._next_alert_at = time.monotonic() + self.settings.alert_min_interval_seconds
+            LOGGER.info(
+                "stage=cross_venue_alert_sent direction=%s net_edge_bps=%s poly_id=%s kalshi=%s",
+                opportunity.direction,
+                opportunity.net_edge_bps,
+                opportunity.candidate.polymarket.id,
+                opportunity.candidate.kalshi.ticker,
+            )
+
+        implication_opportunities = (
+            await self._scan_implications(polymarket_markets, prices)
+            if "--implications" in sys.argv
+            else []
+        )
+
+        elapsed_ms = int((time.monotonic() - started_at) * 1000)
+        LOGGER.info(
+            "stage=cycle_done cycle=%s poly_markets=%s kalshi_markets=%s candidates=%s opportunities=%s implication_opportunities=%s elapsed_ms=%s",
+            self._cycle_count,
+            len(polymarket_markets),
+            len(kalshi_markets),
+            len(candidates),
+            len(opportunities),
+            len(implication_opportunities),
+            elapsed_ms,
+        )
+
+    async def _scan_implications(
+        self,
+        polymarket_markets: list[Market],
+        prices: dict[str, PriceLevel],
+    ) -> list:
+        markets = polymarket_markets[: self.settings.implication_max_markets]
+        LOGGER.info("stage=implication_matching_start markets=%s", len(markets))
+        candidates = self.implication_matcher.find_candidates(markets)
+        LOGGER.info("stage=implication_matching_done candidates=%s", len(candidates))
+        self._log_implication_candidates(candidates, prices)
+        opportunities = self.implication_detector.detect(candidates, prices)
+        LOGGER.info("stage=implication_detection_done opportunities=%s", len(opportunities))
+        for opportunity in opportunities[: self.settings.max_alerts_per_cycle]:
+            self.storage.save_implication_opportunity(opportunity)
+            LOGGER.info(
+                "stage=implication_opportunity net_edge_bps=%s anchor_yes=%s consequence_yes=%s relation=%s score=%.3f premise=%s consequence=%s reason=%s",
+                opportunity.net_edge_bps,
+                opportunity.premise_yes_price,
+                opportunity.consequence_yes_ask,
+                opportunity.candidate.relation_type,
+                opportunity.candidate.score,
+                opportunity.candidate.premise.question[:140],
+                opportunity.candidate.consequence.question[:140],
+                opportunity.candidate.reason[:300],
+            )
+            if time.monotonic() < self._next_alert_at:
+                continue
+            alert_market_id = (
+                f"implication:{opportunity.candidate.premise.id}:"
+                f"{opportunity.candidate.consequence.id}"
+            )
+            if not self.storage.should_alert_key(
+                alert_market_id,
+                cooldown_seconds=self.settings.alert_cooldown_seconds,
+            ):
+                continue
+            await self.telegram.send_implication_opportunity(opportunity)
+            self.storage.mark_alert_key(opportunity.key, alert_market_id)
+            self._next_alert_at = time.monotonic() + self.settings.alert_min_interval_seconds
+            LOGGER.info(
+                "stage=implication_alert_sent net_edge_bps=%s premise_id=%s consequence_id=%s",
+                opportunity.net_edge_bps,
+                opportunity.candidate.premise.id,
+                opportunity.candidate.consequence.id,
+            )
+        return opportunities
+
+    def _log_implication_candidates(self, candidates: list, prices: dict[str, PriceLevel]) -> None:
+        if not self.settings.log_implication_candidates:
+            return
+        for index, candidate in enumerate(candidates[: self.settings.log_top_candidates_limit], start=1):
+            premise_yes = prices.get(candidate.premise.yes_token_id)
+            consequence_yes = prices.get(candidate.consequence.yes_token_id)
+            LOGGER.info(
+                "stage=implication_candidate index=%s score=%.3f relation=%s anchor_yes=%s consequence_yes=%s premise=%s consequence=%s reason=%s",
+                index,
+                candidate.score,
+                candidate.relation_type,
+                premise_yes.ask_price if premise_yes else None,
+                consequence_yes.ask_price if consequence_yes else None,
+                candidate.premise.question[:140],
+                candidate.consequence.question[:140],
+                candidate.reason[:300],
+            )
+
+    async def close(self) -> None:
+        await self.polymarket.close()
+        await self.kalshi.close()
+        await self.telegram.close()
+        self.storage.close()
+
+    def request_stop(self) -> None:
+        self._stop.set()
+
+    async def _sleep_or_stop(self, seconds: float) -> None:
+        with suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(self._stop.wait(), timeout=seconds)
+
+    def _log_polymarket_samples(self, markets: list[Market]) -> None:
+        for index, market in enumerate(markets[: self.settings.log_market_sample_size], start=1):
+            LOGGER.info(
+                "stage=market_sample venue=polymarket index=%s id=%s liquidity=%s volume=%s question=%s",
+                index,
+                market.id,
+                market.liquidity,
+                market.volume,
+                market.question[:180],
+            )
+
+    def _log_kalshi_samples(self, markets: list) -> None:
+        for index, market in enumerate(markets[: self.settings.log_market_sample_size], start=1):
+            LOGGER.info(
+                "stage=market_sample venue=kalshi index=%s ticker=%s yes_ask=%s no_ask=%s liquidity=%s volume=%s title=%s",
+                index,
+                market.ticker,
+                market.yes_ask,
+                market.no_ask,
+                market.liquidity,
+                market.volume,
+                market.title[:180],
+            )
+
+    def _log_match_candidates(self, candidates: list) -> None:
+        if not self.settings.log_cross_venue_candidates:
+            return
+        for index, candidate in enumerate(candidates[: self.settings.log_top_candidates_limit], start=1):
+            LOGGER.info(
+                "stage=match_candidate index=%s score=%.3f match=%s poly_id=%s kalshi=%s poly=%s kalshi_title=%s reason=%s",
+                index,
+                candidate.score,
+                candidate.match_type,
+                candidate.polymarket.id,
+                candidate.kalshi.ticker,
+                candidate.polymarket.question[:140],
+                candidate.kalshi.title[:140],
+                candidate.reason[:300],
+            )
+
+    def _log_opportunity_rejections(self, candidates: list, prices: dict[str, PriceLevel]) -> None:
+        if not self.settings.log_cross_venue_rejections:
+            return
+        preview_count = 0
+        for candidate in candidates:
+            if preview_count >= self.settings.log_top_candidates_limit:
+                break
+            poly_yes = prices.get(candidate.polymarket.yes_token_id)
+            poly_no = prices.get(candidate.polymarket.no_token_id)
+            if poly_yes is None or poly_no is None:
+                continue
+            preview_count += 1
+            for direction, yes_price, no_price in [
+                ("YES_KALSHI_NO_POLYMARKET", candidate.kalshi.yes_ask, poly_no.ask_price),
+                ("YES_POLYMARKET_NO_KALSHI", poly_yes.ask_price, candidate.kalshi.no_ask),
+            ]:
+                total = yes_price + no_price
+                buffer_bps = (
+                    self.settings.exact_match_mismatch_buffer_bps
+                    if candidate.match_type == "exact_equivalent"
+                    else self.settings.near_match_mismatch_buffer_bps
+                )
+                buffer = Decimal(buffer_bps) / Decimal("10000")
+                edge = Decimal("1") - total - buffer
+                LOGGER.info(
+                    "stage=opportunity_check direction=%s net_edge_bps=%s total=%s buffer=%s match=%s score=%.3f poly=%s kalshi=%s",
+                    direction,
+                    int(edge * Decimal("10000")),
+                    total,
+                    buffer,
+                    candidate.match_type,
+                    candidate.score,
+                    candidate.polymarket.question[:120],
+                    candidate.kalshi.title[:120],
+                )
+
 async def async_main() -> None:
-    app = ScreenerApp()
+    app = CrossVenueScreenerApp() if "--cross-venue" in sys.argv else ScreenerApp()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         with suppress(NotImplementedError):
             loop.add_signal_handler(sig, app.request_stop)
     if "--once" in sys.argv:
         app.storage.init()
-        await app.scan_once(force_discovery=True)
+        if isinstance(app, CrossVenueScreenerApp):
+            await app.scan_once()
+        else:
+            await app.scan_once(force_discovery=True)
         await app.close()
         return
 

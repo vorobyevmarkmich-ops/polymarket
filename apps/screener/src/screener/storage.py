@@ -3,6 +3,8 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+from screener.cross_venue import CrossVenueOpportunity
+from screener.implications import ImplicationOpportunity
 from screener.models import Market, Opportunity
 
 
@@ -60,10 +62,111 @@ class Storage:
               market_id text not null,
               sent_at text not null
             );
+
+            create table if not exists cross_venue_opportunities (
+              id integer primary key autoincrement,
+              polymarket_id text not null,
+              kalshi_ticker text not null,
+              match_type text not null,
+              match_score real not null,
+              direction text not null,
+              buy_yes_venue text not null,
+              buy_yes_price text not null,
+              buy_no_venue text not null,
+              buy_no_price text not null,
+              total_cost text not null,
+              estimated_fees text not null,
+              mismatch_buffer text not null,
+              net_edge text not null,
+              net_edge_bps integer not null,
+              reason text not null,
+              detected_at text not null
+            );
+
+            create index if not exists idx_cross_venue_opportunities_detected
+              on cross_venue_opportunities (detected_at);
+
+            create table if not exists implication_opportunities (
+              id integer primary key autoincrement,
+              premise_market_id text not null,
+              consequence_market_id text not null,
+              relation_type text not null,
+              match_score real not null,
+              premise_yes_price text not null,
+              consequence_yes_ask text not null,
+              estimated_fees text not null,
+              implication_buffer text not null,
+              net_edge text not null,
+              net_edge_bps integer not null,
+              reason text not null,
+              detected_at text not null
+            );
+
+            create index if not exists idx_implication_opportunities_detected
+              on implication_opportunities (detected_at);
             """
         )
         self._ensure_column("markets", "fees_enabled", "integer not null default 0")
         self._ensure_column("markets", "fee_type", "text")
+        self._conn.commit()
+
+    def save_implication_opportunity(self, opportunity: ImplicationOpportunity) -> None:
+        candidate = opportunity.candidate
+        self._conn.execute(
+            """
+            insert into implication_opportunities (
+              premise_market_id, consequence_market_id, relation_type, match_score,
+              premise_yes_price, consequence_yes_ask, estimated_fees, implication_buffer,
+              net_edge, net_edge_bps, reason, detected_at
+            )
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            """,
+            (
+                candidate.premise.id,
+                candidate.consequence.id,
+                candidate.relation_type,
+                candidate.score,
+                str(opportunity.premise_yes_price),
+                str(opportunity.consequence_yes_ask),
+                str(opportunity.estimated_fees),
+                str(opportunity.implication_buffer),
+                str(opportunity.net_edge),
+                opportunity.net_edge_bps,
+                candidate.reason,
+            ),
+        )
+        self._conn.commit()
+
+    def save_cross_venue_opportunity(self, opportunity: CrossVenueOpportunity) -> None:
+        candidate = opportunity.candidate
+        self._conn.execute(
+            """
+            insert into cross_venue_opportunities (
+              polymarket_id, kalshi_ticker, match_type, match_score, direction,
+              buy_yes_venue, buy_yes_price, buy_no_venue, buy_no_price,
+              total_cost, estimated_fees, mismatch_buffer, net_edge, net_edge_bps,
+              reason, detected_at
+            )
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            """,
+            (
+                candidate.polymarket.id,
+                candidate.kalshi.ticker,
+                candidate.match_type,
+                candidate.score,
+                opportunity.direction,
+                opportunity.buy_yes_venue,
+                str(opportunity.buy_yes_price),
+                opportunity.buy_no_venue,
+                str(opportunity.buy_no_price),
+                str(opportunity.total_cost),
+                str(opportunity.estimated_fees),
+                str(opportunity.mismatch_buffer),
+                str(opportunity.net_edge),
+                opportunity.net_edge_bps,
+                candidate.reason,
+            ),
+        )
         self._conn.commit()
 
     def _ensure_column(self, table: str, column: str, definition: str) -> None:
@@ -144,6 +247,12 @@ class Storage:
         self._conn.commit()
 
     def should_alert(self, opportunity: Opportunity, cooldown_seconds: int) -> bool:
+        return self.should_alert_key(
+            market_id=opportunity.market.id,
+            cooldown_seconds=cooldown_seconds,
+        )
+
+    def should_alert_key(self, market_id: str, cooldown_seconds: int) -> bool:
         row = self._conn.execute(
             """
             select 1
@@ -151,11 +260,14 @@ class Storage:
             where market_id = ?
               and sent_at > datetime('now', ?)
             """,
-            (opportunity.market.id, f"-{cooldown_seconds} seconds"),
+            (market_id, f"-{cooldown_seconds} seconds"),
         ).fetchone()
         return row is None
 
     def mark_alert_sent(self, opportunity: Opportunity) -> None:
+        self.mark_alert_key(opportunity.key, opportunity.market.id)
+
+    def mark_alert_key(self, opportunity_key: str, market_id: str) -> None:
         self._conn.execute(
             """
             insert into alert_history (opportunity_key, market_id, sent_at)
@@ -163,6 +275,6 @@ class Storage:
             on conflict(opportunity_key) do update set
               sent_at = excluded.sent_at
             """,
-            (opportunity.key, opportunity.market.id),
+            (opportunity_key, market_id),
         )
         self._conn.commit()

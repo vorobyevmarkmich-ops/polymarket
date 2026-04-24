@@ -58,6 +58,13 @@ class Settings:
             "POLYMARKET_CLOB_API_BASE",
             "https://clob.polymarket.com",
         )
+        self.kalshi_api_base = os.getenv(
+            "KALSHI_API_BASE",
+            "https://api.elections.kalshi.com/trade-api/v2",
+        )
+        self.openai_api_key = os.getenv("OPENAI_API_KEY", "")
+        self.openai_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        self.use_openai_matcher = _bool("USE_OPENAI_MATCHER", bool(self.openai_api_key))
 
         self.database_url = os.getenv("DATABASE_URL", "sqlite:///./screener.sqlite3")
 
@@ -80,6 +87,32 @@ class Settings:
         self.log_top_candidates_limit = max(0, min(_int("LOG_TOP_CANDIDATES_LIMIT", 5), 20))
         self.log_top_candidates_every_cycles = max(1, _int("LOG_TOP_CANDIDATES_EVERY_CYCLES", 6))
         self.log_level = os.getenv("LOG_LEVEL", "INFO")
+
+        self.kalshi_market_limit = max(1, min(_int("KALSHI_MARKET_LIMIT", 1000), 1000))
+        self.kalshi_max_pages = max(1, min(_int("KALSHI_MAX_PAGES", 10), 20))
+        self.kalshi_include_multileg = _bool("KALSHI_INCLUDE_MULTILEG", False)
+        self.cross_venue_max_polymarket_markets = max(1, _int("CROSS_VENUE_MAX_POLYMARKET_MARKETS", 250))
+        self.cross_venue_max_kalshi_markets = max(1, _int("CROSS_VENUE_MAX_KALSHI_MARKETS", 250))
+        self.cross_venue_max_candidates = max(1, _int("CROSS_VENUE_MAX_CANDIDATES", 50))
+        self.cross_venue_min_match_score = _float("CROSS_VENUE_MIN_MATCH_SCORE", 0.15)
+        self.cross_venue_min_exact_score = _float("CROSS_VENUE_MIN_EXACT_SCORE", 0.72)
+        self.cross_venue_min_net_edge_bps = _int("MIN_NET_EDGE_BPS", 300)
+        self.cross_venue_fee_bps = _int("CROSS_VENUE_FEE_BPS", 0)
+        self.exact_match_mismatch_buffer_bps = _int("EXACT_MATCH_MISMATCH_BUFFER_BPS", 100)
+        self.near_match_mismatch_buffer_bps = _int("NEAR_MATCH_MISMATCH_BUFFER_BPS", 500)
+        self.allow_near_match_opportunities = _bool("ALLOW_NEAR_MATCH_OPPORTUNITIES", False)
+        self.log_cross_venue_candidates = _bool("LOG_CROSS_VENUE_CANDIDATES", True)
+        self.log_cross_venue_rejections = _bool("LOG_CROSS_VENUE_REJECTIONS", True)
+
+        self.implication_max_markets = max(1, _int("IMPLICATION_MAX_MARKETS", 250))
+        self.implication_max_candidates = max(1, _int("IMPLICATION_MAX_CANDIDATES", 50))
+        self.implication_min_match_score = _float("IMPLICATION_MIN_MATCH_SCORE", 0.18)
+        self.implication_min_anchor_yes_bps = _int("IMPLICATION_MIN_ANCHOR_YES_BPS", 9500)
+        self.implication_min_edge_bps = _int("IMPLICATION_MIN_EDGE_BPS", 500)
+        self.implication_buffer_bps = _int("IMPLICATION_BUFFER_BPS", 300)
+        self.implication_fee_bps = _int("IMPLICATION_FEE_BPS", 0)
+        self.allow_heuristic_implications = _bool("ALLOW_HEURISTIC_IMPLICATIONS", False)
+        self.log_implication_candidates = _bool("LOG_IMPLICATION_CANDIDATES", True)
 
     @property
     def telegram_enabled(self) -> bool:

@@ -1,10 +1,12 @@
 # Risk Ops
 
-Отдельная роль для high-risk зон: деньги, ledger, reconciliation, alerts, incident readiness.
+Отдельная роль для high-risk зон: semantic mismatch, trading safety, деньги later, ledger, reconciliation, alerts, incident readiness.
 
 ## Зона ответственности
 
 - ledger correctness
+- semantic event matching risk
+- deterministic verification
 - idempotency
 - reconciliation
 - risk controls
@@ -15,6 +17,7 @@
 ## Что делает
 
 - проверяет, что финансовая логика остается auditable
+- проверяет, что AI match не используется как единственный источник истины
 - следит, чтобы решения не ослабляли safeguards
 - оценивает impact изменений на deposits, withdrawals, fees и trades
 - помогает формализовать alerts, health checks и operational runbooks
@@ -22,6 +25,8 @@
 ## На что смотрит особенно внимательно
 
 - append-only ledger semantics
+- event equivalence and material differences
+- mismatch buffer
 - duplicate processing risk
 - расхождение internal и external state
 - queue backlog impact

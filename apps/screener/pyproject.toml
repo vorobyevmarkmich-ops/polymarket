@@ -1,7 +1,7 @@
 [project]
-name = "polymarket-screener"
+name = "cross-venue-screener"
 version = "0.1.0"
-description = "MVP-0 Polymarket screener with Telegram alerts."
+description = "MVP-0 cross-venue prediction-market screener with Telegram alerts."
 requires-python = ">=3.11"
 dependencies = [
 ]

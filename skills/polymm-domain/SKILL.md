@@ -1,9 +1,9 @@
 ---
-name: polymm-domain
-description: Use when working on product logic, terminology, UX copy, documentation, or business rules for this PolyMM-based project. Covers the core spread-arbitrage model, user flow, product constraints, legal-safe wording, and the local project references to consult first.
+name: prediction-market-domain
+description: Use when working on product logic, terminology, UX copy, documentation, or business rules for this cross-venue prediction-market arbitrage project. Covers semantic event matching, cross-venue YES/NO arbitrage, risk wording, and local project references.
 ---
 
-# PolyMM Domain
+# Prediction Market Domain
 
 Use this skill when the task touches product semantics rather than just code mechanics.
 
@@ -11,58 +11,67 @@ Use this skill when the task touches product semantics rather than just code mec
 
 - [PROJECT_DOCS.md](../../PROJECT_DOCS.md)
 - [agents.md](../../agents.md)
+- [MVP_0_SCREENER.md](../../MVP_0_SCREENER.md)
 
 ## What this skill covers
 
-- PolyMM product framing
-- spread-arbitrage logic at a high level
-- user journey through Telegram Mini App and dashboard
-- capacity, fees, risks, and disclaimer-sensitive language
-- domain vocabulary to keep consistent across code and docs
+- cross-venue prediction-market arbitrage framing;
+- semantic event matching;
+- canonical event fields;
+- YES/NO opportunity logic across venues;
+- risk and disclaimer-sensitive language;
+- domain vocabulary to keep consistent across code and docs.
 
 ## Core product model
 
-- The project is modeled around market-making / spread arbitrage on Polymarket.
-- The core trade idea is capturing spread by completing `YES + NO` below `$1.00` total cost.
-- Product value depends heavily on low-latency execution, not just strategy logic.
-- Public-facing yield ranges are indicative, not guaranteed.
-- Capacity is constrained by available liquidity and execution quality.
+- The project is modeled around finding equivalent events across venues.
+- First target pair: `Polymarket + Kalshi`.
+- Core trade idea: buy `YES` where it is cheap and buy `NO` where it is cheap on another venue, only when both markets resolve on the same economic event.
+- AI helps understand wording and resolution rules.
+- Deterministic code calculates edge, fees, slippage, stale data and mismatch buffer.
+- Public-facing output must describe opportunities as observed signals, not guaranteed profit.
 
 ## Use these domain anchors
 
-- `User`
-- `Wallet`
-- `Deposit`
-- `Withdrawal`
-- `PoolPosition`
-- `LedgerEntry`
-- `Market`
-- `Order`
-- `Fill`
-- `Trade`
-- `RiskEvent`
-- `FeeEvent`
+- `Venue`
+- `RawMarket`
+- `CanonicalEvent`
+- `EventMatch`
+- `AIMatchingRun`
+- `RuleVerificationRun`
+- `OperatorReview`
+- `OrderbookSnapshot`
+- `CrossVenueOpportunity`
+- `AlertEvent`
 
 ## Product constraints to keep in mind
 
 - Avoid language that implies guaranteed returns.
-- Treat all yield numbers as estimated / historical / indicative.
+- Treat AI matches as advisory until verified.
+- Separate `exact_equivalent`, `near_equivalent`, `related_not_same` and `different`.
+- Require manual review for ambiguous event pairs.
+- Include fees, slippage, stale data and semantic mismatch buffer before calling anything an opportunity.
 - Keep legal and disclaimer-sensitive copy centralized and consistent.
-- The project should be described as high-risk DeFi / prediction-market infrastructure, not a guaranteed investment product.
 
 ## When writing copy or docs
 
 - Prefer precise, neutral wording.
 - Refer back to `PROJECT_DOCS.md` before inventing new terminology.
-- Keep the user flow consistent: deposit -> pool participation -> stats -> withdrawal.
-- Mention Polymarket, Polygon, bridge, and wallet dependencies where relevant.
+- Say `cross-venue opportunity`, `candidate`, or `observed signal`; avoid `risk-free profit`.
+- Explain that titles may differ while economic meaning may match.
+- Mention venue-specific resolution rules when relevant.
 
 ## When making product decisions
 
-- Check whether the decision affects:
-  - risk disclosures
-  - fees
-  - capacity
-  - user balances
-  - trading semantics
-- If yes, align with `PROJECT_DOCS.md` first.
+Check whether the decision affects:
+
+- semantic equivalence;
+- match confidence;
+- operator review;
+- fees/slippage;
+- liquidity/capacity;
+- trading semantics;
+- custody or execution risk.
+
+If yes, align with `PROJECT_DOCS.md` and `ARCHITECTURE.md` first.
+

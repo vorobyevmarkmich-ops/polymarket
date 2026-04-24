@@ -7,6 +7,7 @@
 - test cases
 - regression thinking
 - edge cases
+- semantic matching edge cases
 - API and UI review
 - review money-related сценариев со стороны надежности
 
@@ -22,6 +23,9 @@
 - deposits
 - withdrawals
 - balances
+- exact vs near-equivalent event pairs
+- deadline/timezone mismatches
+- stale venue data
 - queue-driven workflows
 - Telegram Mini App critical paths
 - failure states

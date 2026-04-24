@@ -1,0 +1,1 @@
+worker: PYTHONPATH=src python -m screener.main --cross-venue --implications

@@ -1,15 +1,15 @@
 # Deployment
 
-This project is prepared to run the MVP-0 Polymarket screener as a Railway worker.
+This project currently has a deployable legacy Polymarket-only worker. The product direction has changed to cross-venue prediction-market arbitrage, so this deployment doc should be treated as transitional until the new `Polymarket + Kalshi` screener is implemented.
 
-## Runtime
+## Current Legacy Runtime
 
 - Docker image based on `python:3.12-slim`
 - Start command: `python -m screener.main`
 - Working app: `apps/screener`
 - No web port is required because this is a background worker.
 
-## Required Railway Variables
+## Current Legacy Railway Variables
 
 ```bash
 TELEGRAM_BOT_TOKEN=
@@ -37,13 +37,28 @@ LOG_TOP_CANDIDATES_EVERY_CYCLES=6
 TELEGRAM_DISABLE_WEB_PAGE_PREVIEW=true
 ```
 
+## Target Cross-Venue Variables
+
+Expected additional variables for the new MVP:
+
+```bash
+OPENAI_API_KEY=
+KALSHI_API_BASE=https://api.elections.kalshi.com/trade-api/v2
+MIN_NET_EDGE_BPS=300
+MIN_EXACT_MATCH_CONFIDENCE=0.88
+MIN_NEAR_MATCH_CONFIDENCE=0.75
+EXACT_MATCH_MISMATCH_BUFFER_BPS=100
+NEAR_MATCH_MISMATCH_BUFFER_BPS=500
+PRICE_SCAN_INTERVAL_SECONDS=2
+```
+
 ## Notes
 
-- The worker does not execute trades.
-- The worker does not accept deposits or withdrawals.
-- Keep `MIN_SPREAD_BPS` positive for real signals. It is applied to net spread after estimated Polymarket taker fees.
-- The screener fetches CLOB fee rates dynamically and estimates `net_spread = 1 - yes_ask - no_ask - yes_fee - no_fee`.
-- `MAX_ALERTS_PER_CYCLE` and `ALERT_MIN_INTERVAL_SECONDS` protect Telegram from alert floods.
-- With `LOG_TOP_CANDIDATES=true`, logs include the closest markets by `YES ask + NO ask`, so it is visible why a cycle did or did not produce a signal.
-- SQLite is acceptable for the first smoke deployment, but Railway filesystem persistence may be ephemeral. Move to Postgres after initial validation.
+- The worker must not execute trades in MVP-0.
+- The worker must not accept deposits or withdrawals.
+- Current legacy signals are Polymarket-only and do not validate the new cross-venue hypothesis.
+- New cross-venue signals must include semantic match status, confidence, material differences and mismatch buffer.
+- SQLite is acceptable for smoke validation, but Postgres is preferred once AI runs and operator reviews are stored.
 - Keep secrets in Railway Variables only. Do not commit `.env`.
+- Any API key pasted into chat or logs should be considered compromised and rotated.
+

@@ -15,37 +15,40 @@ Use this skill when the task touches project structure, service boundaries, data
 
 ## Target stack
 
-- `Next.js` frontend
-- `Node.js` backend API
-- `Python` trading / risk / reconciliation workers
-- `Postgres` as source of truth
-- `Redis` for queues, locks, and coordination
-- `Docker Compose` for v1 deployment baseline
+- `Python` collectors, AI matching, scanner and risk workers
+- OpenAI Responses API for semantic event matching
+- `Postgres` as source of truth and audit store
+- `Redis` later for queues, locks, and coordination
+- `Next.js` frontend later for operator dashboard
+- `Node.js` backend API later for review/admin workflows
 
 ## Service boundaries
 
-- `frontend`
-- `backend-api`
-- `trading-worker`
+- `collector-workers`
+- `ai-matching-worker`
+- `scanner-worker`
 - `risk-worker`
-- `reconciliation-worker`
 - `notification-worker`
+- `execution-worker` later
+- `backend-api` later
+- `frontend` later
 
 ## Architecture rules
 
-- Do not couple frontend directly to trading execution.
-- Do not make workers the source of truth for user balances.
-- Use `Postgres` for money and business truth.
-- Use `Redis` for orchestration, not for financial truth.
-- Keep user-facing API and trading execution in separate processes.
-- Assume `global pause` and `kill switch` are required features.
+- Do not let AI output directly trigger trading.
+- Use deterministic verification for event equivalence.
+- Store raw market data, AI runs and operator reviews in `Postgres`.
+- Use `Redis` for orchestration, not for audit truth.
+- Keep matching/scanning separate from execution.
+- Assume `global pause` and `kill switch` are required features before execution.
 
 ## When scaffolding code
 
-- Prefer directories and modules that reflect the service boundaries above.
-- Keep ledger-related logic explicit and auditable.
-- Separate synchronous request handling from background processing.
-- Build for later observability, even in v1.
+- Prefer venue adapters behind a shared interface.
+- Keep AI prompts versioned and outputs structured.
+- Keep opportunity calculation deterministic and testable.
+- Separate market collection, matching, verification and scanning.
+- Build for later observability, even in MVP.
 
 ## When making infra decisions
 

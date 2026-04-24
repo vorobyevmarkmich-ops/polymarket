@@ -1,169 +1,235 @@
 # Architecture
 
-Формальная рабочая схема целевой архитектуры `v1` для проекта вокруг PolyMM / Polymarket.
+Формальная рабочая схема `v1` для cross-venue prediction-market arbitrage.
 
 ## Summary
 
-Архитектура делится на четыре основных слоя:
+Новая архитектура строится вокруг поиска одинаковых событий между площадками и сравнения цен `YES` / `NO` на разных venues.
 
-- `client layer`
-- `api layer`
-- `trading/risk layer`
-- `data/ops layer`
+Дополнительный MVP-поток внутри Polymarket ищет directed implication pairs: событие A почти реализовано, A логически влечет B, но `YES` B все еще дешевле с учетом буфера риска.
 
-Принципиальная идея: пользовательский контур и торговый контур разделены. UI и внешний API не должны напрямую зависеть от исполнения торговой логики в одном процессе.
+Первый MVP pair:
 
-Ближайший practical старт: [MVP_0_SCREENER.md](/Users/markvorobev/Documents/Codex/Pumpfun/MVP_0_SCREENER.md). Для MVP-0 строим только real-time screener Polymarket opportunities и Telegram alerts, без депозитов, dashboard и автотрейдинга.
+- `Polymarket`
+- `Kalshi`
+
+Ключевой принцип: AI используется для semantic matching и объяснения отличий между событиями, но не для финальной торговой математики и не для самостоятельного исполнения.
+
+## High-Level Flow
+
+```text
+Venue collectors
+  -> raw market store
+  -> AI event normalizer
+  -> semantic match engine
+  -> deterministic rule verifier
+  -> approved event pairs
+  -> cross-venue price scanner
+  -> opportunity calculator
+  -> risk filters
+  -> Telegram/operator alerts
+
+Polymarket collector
+  -> raw market store
+  -> implication matcher
+  -> deterministic implication verifier
+  -> implication opportunity detector
+  -> Telegram/operator alerts
+```
 
 ## MVP-0 Architecture
 
 Минимальные компоненты:
 
-- `scanner-worker`
-  Получает markets и market data.
+- `polymarket-adapter`
+  Получает markets/events и orderbook data из Polymarket.
+- `kalshi-adapter`
+  Получает events/markets и orderbook data из Kalshi.
 - `market-registry`
-  Хранит известные рынки и отслеживает новые.
+  Хранит raw markets и snapshots по площадкам.
+- `ai-event-normalizer`
+  Превращает title/rules/description в canonical event schema.
+- `semantic-match-engine`
+  Ищет одинаковые или близкие события между venues.
+- `rule-verifier`
+  Детерминированно проверяет даты, timezone, resolution rules и exclusions.
 - `opportunity-detector`
-  Ищет `YES ask + NO ask < 1.00`.
+  Считает cross-venue opportunity по `YES` на одной площадке и `NO` на другой.
+- `implication-opportunity-detector`
+  Считает Polymarket-only opportunity по направленной связи `premise YES -> consequence YES`.
 - `telegram-alert-bot`
-  Отправляет сигналы оператору.
+  Отправляет research/trade-candidate alerts оператору.
 - `storage`
-  Хранит markets, snapshots, opportunities и alert history.
+  Хранит рынки, matches, AI runs, snapshots, opportunities, alerts и operator review.
 
-Поток MVP-0:
+## AI Layer
 
-1. `scanner-worker` обновляет список рынков.
-2. `scanner-worker` получает цены активных рынков.
-3. `opportunity-detector` считает total cost и spread.
-4. Фильтры отбрасывают stale / small / duplicate opportunities.
-5. `telegram-alert-bot` отправляет alert.
-6. `storage` сохраняет opportunity и alert event.
+AI-agent отвечает за:
 
-Архитектурные ограничения MVP-0:
+- извлечение actor/action/target/time window из рыночных правил;
+- поиск semantic candidates;
+- классификацию пары как `exact_equivalent`, `near_equivalent`, `related_not_same`, `different`;
+- объяснение material differences;
+- выставление confidence;
+- пометку `operator_review_required`.
 
-- нет user-facing deposits;
-- нет withdrawals;
-- нет public dashboard;
-- нет autonomous execution;
-- все opportunities считаются observed signals, а не guaranteed profit.
+AI-agent не отвечает за:
 
-## Основные сервисы
+- расчет edge;
+- принятие торгового решения;
+- обход risk limits;
+- размещение ордеров;
+- хранение денежных балансов.
+
+Для реализации использовать OpenAI Responses API с structured outputs / function calling. Prompt versions и результаты AI runs должны сохраняться.
+
+## Deterministic Verification
+
+`rule-verifier` проверяет:
+
+- совпадение actor / target;
+- совпадение или допустимую эквивалентность action;
+- дедлайн и timezone;
+- inclusive / exclusive boundary;
+- settlement source;
+- resolution text differences;
+- exclusions;
+- market status и close time;
+- payout mechanics.
+
+Если verification находит material mismatch, opportunity не попадает в trade-candidate alerts.
+
+## Opportunity Formula
+
+Базовая формула:
+
+```text
+buy_yes_price + buy_no_price + venue_fees + slippage + mismatch_buffer < 1.00
+```
+
+Где:
+
+- `buy_yes_price` берется с venue, где `YES` дешевле;
+- `buy_no_price` берется с другого venue, где `NO` дешевле;
+- `venue_fees` считаются отдельно по площадкам;
+- `slippage` оценивается по orderbook depth;
+- `mismatch_buffer` зависит от качества semantic match.
+
+Для implication opportunities:
+
+```text
+premise_yes_price - consequence_yes_ask - fees - implication_buffer >= min_edge
+```
+
+`implication_buffer` защищает от ошибки semantic direction и разных resolution rules. Такие сигналы требуют manual/operator review до исполнения.
+
+## Match Status Policy
+
+- `exact_equivalent`
+  Можно мониторить автоматически после первичной проверки.
+- `near_equivalent`
+  Нужен manual review. До подтверждения это только research signal.
+- `related_not_same`
+  Не использовать для арбитража.
+- `different`
+  Игнорировать.
+
+## Основные сервисы v1
 
 ### `frontend`
 
 Назначение:
 
-- landing
-- docs
-- dashboard
-- Telegram Mini App UI
-
-Правила:
-
-- не общается напрямую с trading layer
-- работает только через `backend-api`
+- operator dashboard;
+- future Telegram Mini App;
+- market-pair review UI;
+- opportunity history.
 
 ### `backend-api`
 
 Назначение:
 
-- единая внешняя API-точка
-- auth и sessions
-- user/business state
-- portfolio and balances
-- deposits / withdrawals
-- referrals
-- stats
+- API для dashboard;
+- operator review actions;
+- opportunity history;
+- auth/session/admin;
+- settings для thresholds и venues.
 
-Правила:
-
-- пишет бизнес-состояние в `Postgres`
-- публикует фоновые задачи в `Redis`
-- отдает агрегаты и статус в UI
-
-### `trading-worker`
+### `collector-workers`
 
 Назначение:
 
-- market scanning
-- opportunity detection
-- order placement
-- fill tracking
-- trade event processing
+- Polymarket collector;
+- Kalshi collector;
+- позже Opinion/Predict collectors;
+- нормализация market data;
+- запись snapshots.
 
-Правила:
+### `ai-matching-worker`
 
-- не является источником истины по пользовательским балансам
-- пишет торговые события в систему учета
+Назначение:
+
+- canonical event extraction;
+- candidate pair classification;
+- explanation generation;
+- storing AI runs.
+
+### `scanner-worker`
+
+Назначение:
+
+- отслеживать approved event pairs;
+- читать latest orderbooks;
+- считать cross-venue edge;
+- создавать opportunities.
 
 ### `risk-worker`
 
 Назначение:
 
-- exposure checks
-- trading limits
-- anomaly detection
-- kill switch / pause logic
-
-Правила:
-
-- может блокировать исполнение
-- пишет `risk_events`
-
-### `reconciliation-worker`
-
-Назначение:
-
-- сверка deposits
-- сверка withdrawals
-- сверка balances
-- сверка ledger
-- сверка orders / fills / trades
-
-Правила:
-
-- должен поднимать инцидент при расхождении источников истины
+- фильтры semantic mismatch;
+- min edge thresholds;
+- liquidity/depth checks;
+- stale data checks;
+- venue degradation checks;
+- global pause / kill switch.
 
 ### `notification-worker`
 
 Назначение:
 
-- Telegram notifications
-- пользовательские уведомления
-- сервисные уведомления
-- ops alerts routing
+- Telegram alerts;
+- ops alerts;
+- alert cooldown and deduplication.
 
-## Поток данных
+### `execution-worker` later
 
-1. Пользователь открывает `frontend`.
-2. `frontend` вызывает `backend-api`.
-3. Пользователь создает действие: deposit, withdraw, open app, view stats.
-4. `backend-api` сохраняет состояние в `Postgres`.
-5. `backend-api` публикует фоновую задачу в `Redis`.
-6. `trading-worker` читает market data и исполняет strategy logic.
-7. `risk-worker` проверяет лимиты и право на исполнение.
-8. `trading-worker` пишет `orders`, `fills`, `trades` и связанные события.
-9. `reconciliation-worker` сверяет внешнее и внутреннее состояние.
-10. `backend-api` отдает агрегированные данные в dashboard.
-11. `notification-worker` рассылает события пользователям и в ops-каналы.
+Назначение:
+
+- controlled order placement;
+- fill tracking;
+- cancellation;
+- reconciliation.
+
+В MVP-0 этот сервис не включается.
 
 ## Доменные сущности
 
-- `User`
-- `Wallet`
-- `Deposit`
-- `Withdrawal`
-- `PoolPosition`
-- `LedgerEntry`
-- `Market`
-- `Order`
-- `Fill`
-- `Trade`
-- `StrategyRun`
-- `RiskEvent`
-- `FeeEvent`
-- `ReferralReward`
-- `Notification`
+- `Venue`
+- `RawMarket`
+- `CanonicalEvent`
+- `EventMatch`
+- `AIMatchingRun`
+- `RuleVerificationRun`
+- `OperatorReview`
+- `OrderbookSnapshot`
+- `CrossVenueOpportunity`
+- `AlertEvent`
+- `VenueCredential` later
+- `Order` later
+- `Fill` later
+- `Trade` later
+- `LedgerEntry` later
 
 ## Хранилища
 
@@ -171,82 +237,48 @@
 
 Источник истины для:
 
-- users
-- wallets
-- deposits
-- withdrawals
-- pool positions
-- ledger entries
-- trades
-- fees
-- referrals
-- risk events
+- venues;
+- raw markets;
+- canonical events;
+- event matches;
+- AI runs;
+- operator reviews;
+- snapshots;
+- opportunities;
+- alerts;
+- later orders/fills/ledger.
 
 ### `Redis`
 
 Использовать для:
 
-- `deposit_processing`
-- `withdraw_processing`
-- `trade_execution`
-- `trade_settlement`
-- `reconciliation`
-- `notifications`
-- `risk_checks`
-- distributed locks
+- queues;
+- locks;
+- rate-limit coordination;
+- short-lived latest market cache;
+- notification deduplication.
 
-## Архитектурные правила
-
-- Не смешивать user-facing API и trading execution в одном процессе.
-- Не хранить финансовое состояние только в памяти воркеров.
-- Не использовать `Redis` как денежный источник истины.
-- Все пользовательские агрегаты должны быть производны от ledger и торговых событий.
-- Любая критичная операция должна быть идемпотентной.
-- Должны существовать `global pause` и ручной `kill switch`.
+Не использовать `Redis` как источник истины для денег, matches или audit data.
 
 ## Observability
 
-Обязательно с первого дня:
+Обязательные метрики:
 
-- `Sentry`
-- `Prometheus + Grafana`
-- централизованные логи
-- health checks
+- collector success/fail rate by venue;
+- stale market data count;
+- AI matching latency/cost/error rate;
+- match confidence distribution;
+- operator approval/rejection rate;
+- opportunities by venue pair;
+- net edge distribution;
+- alert delivery failures;
+- venue API degradation.
 
-Алерты:
+## Security
 
-- fill rate drop
-- latency spike
-- failed deposits
-- failed withdrawals
-- ledger mismatch
-- external API degradation
-- queue backlog
-- global trading pause
-
-## Security и контроль
-
-- secrets только через env / secret manager
-- RBAC для admin
-- audit log для admin действий
-- idempotency keys для deposits / withdrawals
-- reconciliation jobs обязательны
-- legal/disclaimer-sensitive тексты централизовать
-
-## Ограничения v1
-
-- Не дробить систему слишком рано на большое число микросервисов.
-- Не строить сложный orchestration layer до появления реальной необходимости.
-- Не давать frontend прямой доступ к trading engine.
-- Не делать архитектуру зависимой от optimistic in-memory state.
-
-## Что уточнить позже
-
-После появления кода и интеграций нужно дополнить:
-
-- фактические API contracts
-- схему таблиц
-- event schemas
-- queue naming conventions
-- env layout
-- deployment topology по средам `local`, `staging`, `production`
+- Все API keys только через `.env` / secret manager.
+- OpenAI API key хранить как `OPENAI_API_KEY`.
+- Ключи, попавшие в чат или логи, считать скомпрометированными и ротировать.
+- Trading credentials отделить от data-only credentials.
+- AI output сохранять для аудита, но не хранить secrets в prompt inputs.
+- Execution позже должен иметь отдельные лимиты, idempotency keys и kill switch.
