@@ -241,7 +241,7 @@ class ImplicationDetector:
         prices: dict[str, PriceLevel],
     ) -> list[ImplicationOpportunity]:
         opportunities: list[ImplicationOpportunity] = []
-        allowed = {"strict_implication", "likely_implication"}
+        allowed = {"strict_implication"}
         if self.settings.allow_heuristic_implications:
             allowed.add("possible_implication")
 
