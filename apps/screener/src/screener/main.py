@@ -152,7 +152,7 @@ class ScreenerApp:
             reverse=True,
         )[: self.settings.implication_max_markets]
         LOGGER.info("stage=implication_matching_start markets=%s", len(markets))
-        candidates = self.implication_matcher.find_candidates(markets)
+        candidates = self.implication_matcher.find_candidates(markets, prices)
         LOGGER.info("stage=implication_matching_done candidates=%s", len(candidates))
         self._log_implication_candidates(candidates, prices)
         opportunities = self.implication_detector.detect(candidates, prices)
@@ -450,7 +450,7 @@ class CrossVenueScreenerApp:
     ) -> list:
         markets = polymarket_markets[: self.settings.implication_max_markets]
         LOGGER.info("stage=implication_matching_start markets=%s", len(markets))
-        candidates = self.implication_matcher.find_candidates(markets)
+        candidates = self.implication_matcher.find_candidates(markets, prices)
         LOGGER.info("stage=implication_matching_done candidates=%s", len(candidates))
         self._log_implication_candidates(candidates, prices)
         opportunities = self.implication_detector.detect(candidates, prices)

@@ -48,7 +48,11 @@ class ImplicationMatcher:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
-    def find_candidates(self, markets: list[Market]) -> list[ImplicationCandidate]:
+    def find_candidates(
+        self,
+        markets: list[Market],
+        prices: dict[str, PriceLevel] | None = None,
+    ) -> list[ImplicationCandidate]:
         raw_candidates: list[ImplicationCandidate] = []
         ranked_pairs: list[tuple[float, Market, Market, str]] = []
         limited = markets[: self.settings.implication_max_markets]
@@ -81,11 +85,30 @@ class ImplicationMatcher:
                 right.question[:140],
             )
 
-        raw_candidates.sort(key=lambda item: item.score, reverse=True)
+        raw_candidates.sort(
+            key=lambda item: self._candidate_priority(item, prices),
+            reverse=True,
+        )
         raw_candidates = raw_candidates[: self.settings.implication_max_candidates]
         if self.settings.use_openai_matcher and self.settings.openai_api_key:
             return self._classify_with_openai(raw_candidates)
         return raw_candidates
+
+    def _candidate_priority(
+        self,
+        candidate: ImplicationCandidate,
+        prices: dict[str, PriceLevel] | None,
+    ) -> float:
+        if prices is None:
+            return candidate.score
+        premise_yes = prices.get(candidate.premise.yes_token_id)
+        consequence_yes = prices.get(candidate.consequence.yes_token_id)
+        if premise_yes is None or consequence_yes is None:
+            return candidate.score
+        raw_edge = premise_yes.ask_price - consequence_yes.ask_price
+        edge_bonus = max(Decimal("0"), raw_edge) * Decimal("2")
+        anchor_bonus = Decimal("0.25") if premise_yes.ask_price >= Decimal("0.80") else Decimal("0")
+        return float(Decimal(str(candidate.score)) + edge_bonus + anchor_bonus)
 
     def _heuristic_directions(
         self,
