@@ -374,6 +374,7 @@ def _entity_stripped(text: str) -> str:
     normalized = text.lower()
     normalized = re.sub(r"will\s+.+?\s+(finish in the top [0-9].*)", r"will ENTITY \1", normalized)
     normalized = re.sub(r"will\s+.+?\s+(be relegated.*)", r"will ENTITY \1", normalized)
+    normalized = re.sub(r"will\s+.+?\s+(be the top goal scorer.*)", r"will ENTITY \1", normalized)
     normalized = re.sub(r"will\s+.+?\s+(win the 20[0-9][0-9].*)", r"will ENTITY \1", normalized)
     normalized = re.sub(r"\s+", " ", normalized)
     return normalized.strip()

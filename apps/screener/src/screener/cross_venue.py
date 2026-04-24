@@ -68,13 +68,17 @@ GENERIC_MATCH_TERMS = {
     "1st",
     "2nd",
     "3rd",
+    "april",
     "election",
     "final",
+    "open",
     "presidential",
+    "price",
     "rate",
     "rates",
     "relegated",
     "top",
+    "united",
     "win",
     "wins",
 }
@@ -143,6 +147,16 @@ POLITICS_TERMS = {
     "presidential",
     "republican",
     "senate",
+}
+
+ENTERTAINMENT_TERMS = {
+    "album",
+    "box office",
+    "eurovision",
+    "grammy",
+    "movie",
+    "oscars",
+    "song",
 }
 
 
@@ -425,6 +439,8 @@ def _domain(text: str) -> str:
     normalized = text.lower()
     if any(term in normalized for term in CRYPTO_TERMS):
         return "crypto"
+    if any(term in normalized for term in ENTERTAINMENT_TERMS):
+        return "entertainment"
     if any(term in normalized for term in ECON_TERMS):
         return "economics"
     if any(term in normalized for term in SPORT_TERMS):
@@ -437,6 +453,14 @@ def _domain(text: str) -> str:
 def _compatible_domains(left: str, right: str) -> bool:
     left_domain = _domain(left)
     right_domain = _domain(right)
+    if left_domain in {"economics", "sports", "politics", "crypto", "entertainment"} and right_domain in {
+        "economics",
+        "sports",
+        "politics",
+        "crypto",
+        "entertainment",
+    }:
+        return left_domain == right_domain
     return (
         left_domain == right_domain
         or left_domain == "general"
