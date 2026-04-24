@@ -197,7 +197,8 @@ class ImplicationMatcher:
                         "relation_type must be strict_implication, likely_implication, equivalent, "
                         "related_no_implication, inverse_or_conflict, or different. "
                         "Be conservative: if wording, dates, venue, tournament stage, or resolution criteria differ "
-                        "materially, do not classify as an implication."
+                        "materially, do not classify as an implication. "
+                        "Write explanation and material_risks in Russian."
                     ),
                 },
                 {"role": "user", "content": json.dumps(prompt, ensure_ascii=True)},

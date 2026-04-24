@@ -297,7 +297,8 @@ class SemanticMatcher:
                     "content": (
                         "You classify whether two prediction-market contracts represent the same economic event. "
                         "Return only compact JSON with keys match_type, confidence, material_differences, explanation. "
-                        "match_type must be exact_equivalent, near_equivalent, related_not_same, or different."
+                        "match_type must be exact_equivalent, near_equivalent, related_not_same, or different. "
+                        "Write explanation and material_differences in Russian."
                     ),
                 },
                 {"role": "user", "content": json.dumps(prompt, ensure_ascii=True)},

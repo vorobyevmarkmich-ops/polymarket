@@ -3,6 +3,8 @@ from __future__ import annotations
 import html
 import json
 import logging
+import re
+from decimal import Decimal
 from typing import TYPE_CHECKING
 from urllib.request import Request, urlopen
 
@@ -14,6 +16,57 @@ if TYPE_CHECKING:
     from screener.implications import ImplicationOpportunity
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _price(value: Decimal) -> str:
+    return f"{value:.3f} ({value * Decimal('100'):.1f}%)"
+
+
+def _pct_bps(value: int) -> str:
+    return f"{value / 100:.2f}%"
+
+
+def _money(value: Decimal) -> str:
+    return f"${value:.2f}"
+
+
+def _ru_match_type(value: str) -> str:
+    labels = {
+        "exact_equivalent": "одинаковое событие",
+        "near_equivalent": "почти одинаковое событие",
+        "related_not_same": "связано, но не то же самое",
+        "different": "разные события",
+    }
+    return labels.get(value, value)
+
+
+def _ru_relation_type(value: str) -> str:
+    labels = {
+        "strict_implication": "строгая логическая связка",
+        "likely_implication": "вероятная связка",
+        "equivalent": "эквивалентные события",
+        "related_no_implication": "связано, но без логического следствия",
+        "inverse_or_conflict": "обратная/конфликтующая связка",
+        "different": "разные события",
+        "possible_implication": "эвристическая связка",
+    }
+    return labels.get(value, value)
+
+
+def _short_reason(reason: str) -> str:
+    if reason.startswith("deterministic nested threshold"):
+        return "Детерминированная проверка: более жесткий ценовой порог логически подразумевает более мягкий."
+    if reason.startswith("deterministic nested rank"):
+        return "Детерминированная проверка: более высокий результат в таблице логически подразумевает более широкий top-N."
+    confidence = re.search(r"ai confidence=([0-9.]+)", reason)
+    cleaned = re.sub(r"^ai confidence=[0-9.]+;\s*", "", reason).strip()
+    cleaned = re.sub(r";\s*(risks|differences)=.*$", "", cleaned).strip()
+    if cleaned:
+        prefix = f"AI-проверка, уверенность {confidence.group(1)}: " if confidence else "AI-проверка: "
+        return prefix + cleaned[:500]
+    if confidence:
+        return f"AI-проверка, уверенность {confidence.group(1)}."
+    return reason[:500]
 
 
 class TelegramNotifier:
@@ -64,24 +117,23 @@ class TelegramNotifier:
         market = opportunity.market
         return "\n".join(
             [
-                "<b>New Polymarket opportunity</b>",
+                "<b>Сигнал: внутрирыночный арбитраж Polymarket</b>",
                 "",
-                f"<b>Market:</b> {html.escape(market.question)}",
-                f"<b>YES ask:</b> {opportunity.yes_ask}",
-                f"<b>NO ask:</b> {opportunity.no_ask}",
-                f"<b>Raw total:</b> {opportunity.total_cost}",
-                f"<b>Gross spread:</b> {opportunity.gross_spread_bps / 100:.2f}%",
-                f"<b>Estimated fees:</b> {opportunity.total_fees:.6f} USDC/share",
-                f"<b>Net spread:</b> {opportunity.spread_bps / 100:.2f}%",
-                f"<b>Fee rates:</b> YES {opportunity.yes_fee_rate_bps}, NO {opportunity.no_fee_rate_bps}",
-                f"<b>Estimated size:</b> ${opportunity.estimated_size_usd}",
-                f"<b>Rough profit estimate:</b> ${opportunity.spread * opportunity.estimated_size_usd:.2f}",
-                f"<b>Liquidity:</b> ${market.liquidity}",
+                "<b>Что проверить:</b> можно купить YES и NO дешевле 1.00 с учетом комиссий.",
+                f"<b>Рынок:</b> {html.escape(market.question)}",
                 "",
-                f"<b>URL:</b> {html.escape(market.url)}",
-                f"<b>Detected:</b> {opportunity.detected_at.isoformat()}",
+                f"<b>YES ask:</b> {_price(opportunity.yes_ask)}",
+                f"<b>NO ask:</b> {_price(opportunity.no_ask)}",
+                f"<b>Сумма входа:</b> {opportunity.total_cost}",
+                f"<b>Чистый спред:</b> {_pct_bps(opportunity.spread_bps)}",
+                f"<b>Комиссии:</b> {opportunity.total_fees:.6f} USDC/share",
+                f"<b>Оценка размера:</b> {_money(opportunity.estimated_size_usd)}",
+                f"<b>Грубая оценка прибыли:</b> {_money(opportunity.spread * opportunity.estimated_size_usd)}",
+                f"<b>Ликвидность:</b> {_money(market.liquidity)}",
                 "",
-                "Signal only. Not guaranteed profit. No auto-execution.",
+                f"<b>Ссылка:</b> {html.escape(market.url)}",
+                "",
+                "Это сигнал для ручной проверки. Автосделок нет, прибыль не гарантирована.",
             ]
         )
 
@@ -89,25 +141,27 @@ class TelegramNotifier:
         candidate = opportunity.candidate
         return "\n".join(
             [
-                "<b>New cross-venue opportunity</b>",
+                "<b>Сигнал: арбитраж между площадками</b>",
                 "",
-                f"<b>Direction:</b> {html.escape(opportunity.direction)}",
-                f"<b>Buy YES:</b> {html.escape(opportunity.buy_yes_venue)} @ {opportunity.buy_yes_price}",
-                f"<b>Buy NO:</b> {html.escape(opportunity.buy_no_venue)} @ {opportunity.buy_no_price}",
-                f"<b>Total cost:</b> {opportunity.total_cost}",
-                f"<b>Estimated fees:</b> {opportunity.estimated_fees}",
-                f"<b>Mismatch buffer:</b> {opportunity.mismatch_buffer}",
-                f"<b>Net edge:</b> {opportunity.net_edge_bps / 100:.2f}%",
+                "<b>Идея:</b> одно и то же событие оценено по-разному на Polymarket и Kalshi.",
+                "<b>Что сделать после ручной проверки правил:</b>",
+                f"1. Купить YES на {html.escape(opportunity.buy_yes_venue)} по {_price(opportunity.buy_yes_price)}",
+                f"2. Купить NO на {html.escape(opportunity.buy_no_venue)} по {_price(opportunity.buy_no_price)}",
                 "",
-                f"<b>Match:</b> {html.escape(candidate.match_type)} ({candidate.score:.2f})",
+                f"<b>Сумма входа:</b> {opportunity.total_cost}",
+                f"<b>Комиссии:</b> {opportunity.estimated_fees}",
+                f"<b>Буфер на несовпадение правил:</b> {opportunity.mismatch_buffer}",
+                f"<b>Чистый edge:</b> {_pct_bps(opportunity.net_edge_bps)}",
+                "",
+                f"<b>Тип совпадения:</b> {html.escape(_ru_match_type(candidate.match_type))} ({candidate.score:.2f})",
                 f"<b>Polymarket:</b> {html.escape(candidate.polymarket.question)}",
                 f"<b>Kalshi:</b> {html.escape(candidate.kalshi.title)}",
-                f"<b>Reason:</b> {html.escape(candidate.reason[:700])}",
+                f"<b>Почему бот связал рынки:</b> {html.escape(_short_reason(candidate.reason))}",
                 "",
-                f"<b>Polymarket URL:</b> {html.escape(candidate.polymarket.url)}",
-                f"<b>Kalshi URL:</b> {html.escape(candidate.kalshi.url)}",
+                f"<b>Polymarket:</b> {html.escape(candidate.polymarket.url)}",
+                f"<b>Kalshi:</b> {html.escape(candidate.kalshi.url)}",
                 "",
-                "Signal only. Not guaranteed profit. No auto-execution.",
+                "Это сигнал для ручной проверки. Особенно проверь resolution rules, даты и ликвидность. Автосделок нет.",
             ]
         )
 
@@ -115,22 +169,27 @@ class TelegramNotifier:
         candidate = opportunity.candidate
         return "\n".join(
             [
-                "<b>New Polymarket implication opportunity</b>",
+                "<b>Сигнал: связка внутри Polymarket</b>",
                 "",
-                f"<b>Premise YES:</b> {opportunity.premise_yes_price}",
-                f"<b>Consequence YES ask:</b> {opportunity.consequence_yes_ask}",
-                f"<b>Estimated fees:</b> {opportunity.estimated_fees}",
-                f"<b>Implication buffer:</b> {opportunity.implication_buffer}",
-                f"<b>Net edge:</b> {opportunity.net_edge_bps / 100:.2f}%",
+                "<b>Идея:</b> если первый рынок почти уже YES, то второй рынок тоже должен стать YES, но стоит дешевле.",
+                "<b>Что сделать после ручной проверки правил:</b>",
+                f"1. Проверить, что YES в первом рынке действительно логически ведет к YES во втором.",
+                f"2. Рассмотреть покупку YES во втором рынке по {_price(opportunity.consequence_yes_ask)}.",
                 "",
-                f"<b>Relation:</b> {html.escape(candidate.relation_type)} ({candidate.score:.2f})",
-                f"<b>If YES:</b> {html.escape(candidate.premise.question)}",
-                f"<b>Then YES:</b> {html.escape(candidate.consequence.question)}",
-                f"<b>Reason:</b> {html.escape(candidate.reason[:700])}",
+                f"<b>Первый рынок уже оценивается как YES:</b> {_price(opportunity.premise_yes_price)}",
+                f"<b>Цена YES во втором рынке:</b> {_price(opportunity.consequence_yes_ask)}",
+                f"<b>Буфер на ошибку связки:</b> {opportunity.implication_buffer}",
+                f"<b>Комиссии:</b> {opportunity.estimated_fees}",
+                f"<b>Чистый edge:</b> {_pct_bps(opportunity.net_edge_bps)}",
                 "",
-                f"<b>Premise URL:</b> {html.escape(candidate.premise.url)}",
-                f"<b>Consequence URL:</b> {html.escape(candidate.consequence.url)}",
+                f"<b>Тип связки:</b> {html.escape(_ru_relation_type(candidate.relation_type))} ({candidate.score:.2f})",
+                f"<b>Если YES:</b> {html.escape(candidate.premise.question)}",
+                f"<b>То должен быть YES:</b> {html.escape(candidate.consequence.question)}",
+                f"<b>Почему бот так решил:</b> {html.escape(_short_reason(candidate.reason))}",
                 "",
-                "Signal only. Requires manual resolution-rule review. No auto-execution.",
+                f"<b>Первый рынок:</b> {html.escape(candidate.premise.url)}",
+                f"<b>Второй рынок:</b> {html.escape(candidate.consequence.url)}",
+                "",
+                "Это не гарантия прибыли. Перед входом обязательно сверить правила резолва обоих рынков. Автосделок нет.",
             ]
         )
