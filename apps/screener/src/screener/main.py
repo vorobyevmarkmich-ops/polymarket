@@ -27,6 +27,8 @@ class ScreenerApp:
         logging.basicConfig(
             level=getattr(logging, self.settings.log_level.upper(), logging.INFO),
             format="%(asctime)s %(levelname)s %(name)s %(message)s",
+            stream=sys.stdout,
+            force=True,
         )
         self.polymarket = PolymarketClient(self.settings)
         self.detector = OpportunityDetector(self.settings)
@@ -285,6 +287,8 @@ class CrossVenueScreenerApp:
         logging.basicConfig(
             level=getattr(logging, self.settings.log_level.upper(), logging.INFO),
             format="%(asctime)s %(levelname)s %(name)s %(message)s",
+            stream=sys.stdout,
+            force=True,
         )
         self.polymarket = PolymarketClient(self.settings)
         self.kalshi = KalshiClient(self.settings)
