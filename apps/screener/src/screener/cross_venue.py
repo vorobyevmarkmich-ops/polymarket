@@ -40,6 +40,109 @@ STOPWORDS = {
     "with",
     "yes",
     "no",
+    "above",
+    "after",
+    "below",
+    "finish",
+    "game",
+    "happen",
+    "market",
+    "match",
+    "over",
+    "round",
+    "season",
+    "standings",
+    "under",
+    "win",
+    "wins",
+}
+
+GENERIC_MATCH_TERMS = {
+    "2024",
+    "2025",
+    "2026",
+    "2027",
+    "2028",
+    "2029",
+    "2030",
+    "1st",
+    "2nd",
+    "3rd",
+    "election",
+    "final",
+    "presidential",
+    "rate",
+    "rates",
+    "relegated",
+    "top",
+    "win",
+    "wins",
+}
+
+SPORT_TERMS = {
+    "basketball",
+    "bundesliga",
+    "champions",
+    "cricket",
+    "cs2",
+    "epl",
+    "esports",
+    "fifa",
+    "football",
+    "game",
+    "league",
+    "liga",
+    "match",
+    "mlb",
+    "nba",
+    "nfl",
+    "nhl",
+    "overwatch",
+    "premier",
+    "serie",
+    "soccer",
+    "tennis",
+    "tournament",
+    "world cup",
+}
+
+ECON_TERMS = {
+    "business climate",
+    "cpi",
+    "fed",
+    "gdp",
+    "ifo",
+    "inflation",
+    "interest",
+    "payrolls",
+    "rate cuts",
+    "rates",
+    "unemployment",
+}
+
+CRYPTO_TERMS = {
+    "bitcoin",
+    "btc",
+    "crypto",
+    "ethereum",
+    "eth",
+    "fdv",
+    "launch",
+    "market cap",
+    "token",
+}
+
+POLITICS_TERMS = {
+    "congress",
+    "democratic",
+    "election",
+    "house",
+    "midterm",
+    "nomination",
+    "president",
+    "presidential",
+    "republican",
+    "senate",
 }
 
 
@@ -97,8 +200,13 @@ class SemanticMatcher:
                 if not kalshi_terms:
                     continue
                 score = _jaccard(poly_terms, kalshi_terms)
+                shared_terms = poly_terms & kalshi_terms
+                if not _compatible_domains(poly.question, kalshi.text):
+                    continue
+                if not _has_specific_overlap(shared_terms):
+                    continue
                 if score > 0:
-                    shared = ", ".join(sorted(poly_terms & kalshi_terms)[:12])
+                    shared = ", ".join(sorted(shared_terms)[:12])
                     raw_top.append((score, poly, kalshi, shared))
                 if score < self.settings.cross_venue_min_match_score:
                     continue
@@ -107,7 +215,7 @@ class SemanticMatcher:
                     if score >= self.settings.cross_venue_min_exact_score
                     else "near_equivalent"
                 )
-                shared = ", ".join(sorted(poly_terms & kalshi_terms)[:12])
+                shared = ", ".join(sorted(shared_terms)[:12])
                 candidates.append(
                     EventCandidate(
                         polymarket=poly,
@@ -294,13 +402,46 @@ class CrossVenueDetector:
 
 def _terms(text: str) -> set[str]:
     words = re.findall(r"[a-z0-9]+", text.lower())
-    return {word for word in words if len(word) > 2 and word not in STOPWORDS}
+    return {
+        word
+        for word in words
+        if len(word) > 2
+        and word not in STOPWORDS
+        and not re.fullmatch(r"20\d\d", word)
+    }
 
 
 def _jaccard(left: set[str], right: set[str]) -> float:
     if not left or not right:
         return 0.0
     return len(left & right) / len(left | right)
+
+
+def _has_specific_overlap(shared_terms: set[str]) -> bool:
+    return any(term not in GENERIC_MATCH_TERMS for term in shared_terms)
+
+
+def _domain(text: str) -> str:
+    normalized = text.lower()
+    if any(term in normalized for term in CRYPTO_TERMS):
+        return "crypto"
+    if any(term in normalized for term in ECON_TERMS):
+        return "economics"
+    if any(term in normalized for term in SPORT_TERMS):
+        return "sports"
+    if any(term in normalized for term in POLITICS_TERMS):
+        return "politics"
+    return "general"
+
+
+def _compatible_domains(left: str, right: str) -> bool:
+    left_domain = _domain(left)
+    right_domain = _domain(right)
+    return (
+        left_domain == right_domain
+        or left_domain == "general"
+        or right_domain == "general"
+    )
 
 
 def _response_text(data: dict[str, Any]) -> str:

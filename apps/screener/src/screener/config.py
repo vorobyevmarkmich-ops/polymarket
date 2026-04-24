@@ -81,7 +81,7 @@ class Settings:
         self.max_price_staleness_seconds = _int("MAX_PRICE_STALENESS_SECONDS", 5)
 
         self.gamma_page_limit = max(1, min(_int("GAMMA_PAGE_LIMIT", 200), 1000))
-        self.max_markets_per_discovery = max(1, _int("MAX_MARKETS_PER_DISCOVERY", 1000))
+        self.max_markets_per_discovery = max(1, _int("MAX_MARKETS_PER_DISCOVERY", 5000))
         self.clob_price_batch_size = max(1, min(_int("CLOB_PRICE_BATCH_SIZE", 250), 500))
         self.log_market_sample_size = max(0, min(_int("LOG_MARKET_SAMPLE_SIZE", 5), 20))
         self.log_top_candidates_limit = max(0, min(_int("LOG_TOP_CANDIDATES_LIMIT", 5), 20))

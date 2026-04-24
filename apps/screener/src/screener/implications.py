@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 from urllib.request import Request, urlopen
 
 from screener.config import Settings
-from screener.cross_venue import _confidence, _jaccard, _response_text, _terms
+from screener.cross_venue import _confidence, _has_specific_overlap, _jaccard, _response_text, _terms
 from screener.models import Market, PriceLevel
 
 LOGGER = logging.getLogger(__name__)
@@ -70,6 +71,23 @@ class ImplicationMatcher:
                     continue
                 shared = ", ".join(sorted(left_terms & right_terms)[:12])
                 ranked_pairs.append((score, left, right, shared))
+                nested = _nested_implication(left, right)
+                if nested:
+                    premise, consequence, reason = nested
+                    raw_candidates.append(
+                        ImplicationCandidate(
+                            premise=premise,
+                            consequence=consequence,
+                            score=max(score, 0.95),
+                            relation_type="strict_implication",
+                            reason=reason,
+                        )
+                    )
+                    continue
+                if not _has_specific_overlap(left_terms & right_terms):
+                    continue
+                if _same_template_different_entity(left.question, right.question):
+                    continue
                 if score < self.settings.implication_min_match_score:
                     continue
                 raw_candidates.extend(self._heuristic_directions(left, right, score, shared))
@@ -108,7 +126,8 @@ class ImplicationMatcher:
         raw_edge = premise_yes.ask_price - consequence_yes.ask_price
         edge_bonus = max(Decimal("0"), raw_edge) * Decimal("2")
         anchor_bonus = Decimal("0.25") if premise_yes.ask_price >= Decimal("0.80") else Decimal("0")
-        return float(Decimal(str(candidate.score)) + edge_bonus + anchor_bonus)
+        relation_bonus = Decimal("1.5") if candidate.relation_type == "strict_implication" else Decimal("0")
+        return float(Decimal(str(candidate.score)) + edge_bonus + anchor_bonus + relation_bonus)
 
     def _heuristic_directions(
         self,
@@ -138,6 +157,9 @@ class ImplicationMatcher:
     def _classify_with_openai(self, candidates: list[ImplicationCandidate]) -> list[ImplicationCandidate]:
         refined: list[ImplicationCandidate] = []
         for candidate in candidates:
+            if candidate.reason.startswith("deterministic"):
+                refined.append(candidate)
+                continue
             try:
                 refined.append(self._classify_one_with_openai(candidate))
             except Exception:
@@ -257,3 +279,101 @@ class ImplicationDetector:
             implication_buffer=implication_buffer,
             net_edge=net_edge,
         )
+
+
+def _nested_implication(left: Market, right: Market) -> tuple[Market, Market, str] | None:
+    left_threshold = _threshold(left.question)
+    right_threshold = _threshold(right.question)
+    if left_threshold and right_threshold:
+        left_subject, left_operator, left_value = left_threshold
+        right_subject, right_operator, right_value = right_threshold
+        if _similar_subject(left_subject, right_subject) and left_operator == right_operator:
+            if left_operator in {">", ">="}:
+                if left_value > right_value:
+                    return left, right, "deterministic nested threshold: higher threshold implies lower threshold"
+                if right_value > left_value:
+                    return right, left, "deterministic nested threshold: higher threshold implies lower threshold"
+            if left_operator in {"<", "<="}:
+                if left_value < right_value:
+                    return left, right, "deterministic nested threshold: lower threshold implies higher threshold"
+                if right_value < left_value:
+                    return right, left, "deterministic nested threshold: lower threshold implies higher threshold"
+
+    left_top = _top_n(left.question)
+    right_top = _top_n(right.question)
+    if left_top and right_top:
+        left_subject, left_n = left_top
+        right_subject, right_n = right_top
+        if _similar_subject(left_subject, right_subject):
+            if left_n < right_n:
+                return left, right, "deterministic nested rank: stricter top-N implies looser top-N"
+            if right_n < left_n:
+                return right, left, "deterministic nested rank: stricter top-N implies looser top-N"
+    return None
+
+
+def _threshold(text: str) -> tuple[str, str, Decimal] | None:
+    normalized = text.lower().replace(",", "")
+    match = re.search(r"(.+?)\s*(>=|<=|>|<|above|below|over|under|at least)\s*\$?([0-9]+(?:\.[0-9]+)?)\s*([kmb])?", normalized)
+    if not match:
+        return None
+    subject = _normalize_subject(match.group(1))
+    operator = match.group(2)
+    value = Decimal(match.group(3))
+    suffix = match.group(4)
+    if suffix == "k":
+        value *= Decimal("1000")
+    elif suffix == "m":
+        value *= Decimal("1000000")
+    elif suffix == "b":
+        value *= Decimal("1000000000")
+    if operator in {"above", "over", "at least"}:
+        operator = ">="
+    elif operator in {"below", "under"}:
+        operator = "<="
+    return subject, operator, value
+
+
+def _top_n(text: str) -> tuple[str, int] | None:
+    normalized = text.lower()
+    match = re.search(r"will\s+(.+?)\s+finish\s+in\s+the\s+top\s+([0-9]+)", normalized)
+    if not match:
+        return None
+    return _normalize_subject(match.group(1)), int(match.group(2))
+
+
+def _similar_subject(left: str, right: str) -> bool:
+    left_terms = _terms(left)
+    right_terms = _terms(right)
+    if not left_terms or not right_terms:
+        return False
+    overlap = left_terms & right_terms
+    return bool(overlap) and len(overlap) / max(len(left_terms), len(right_terms)) >= 0.60
+
+
+def _normalize_subject(text: str) -> str:
+    text = re.sub(r"^will\s+", "", text.strip().lower())
+    text = re.sub(r"\?$", "", text)
+    return text
+
+
+def _same_template_different_entity(left: str, right: str) -> bool:
+    left_normalized = _entity_stripped(left)
+    right_normalized = _entity_stripped(right)
+    if left_normalized != right_normalized:
+        return False
+    left_terms = _terms(left)
+    right_terms = _terms(right)
+    shared = left_terms & right_terms
+    unique_left = left_terms - shared
+    unique_right = right_terms - shared
+    return bool(unique_left and unique_right)
+
+
+def _entity_stripped(text: str) -> str:
+    normalized = text.lower()
+    normalized = re.sub(r"will\s+.+?\s+(finish in the top [0-9].*)", r"will ENTITY \1", normalized)
+    normalized = re.sub(r"will\s+.+?\s+(be relegated.*)", r"will ENTITY \1", normalized)
+    normalized = re.sub(r"will\s+.+?\s+(win the 20[0-9][0-9].*)", r"will ENTITY \1", normalized)
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized.strip()

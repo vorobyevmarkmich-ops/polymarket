@@ -9,7 +9,7 @@ from contextlib import suppress
 from decimal import Decimal
 
 from screener.config import load_settings
-from screener.cross_venue import CrossVenueDetector, SemanticMatcher
+from screener.cross_venue import CrossVenueDetector, SemanticMatcher, _domain
 from screener.detector import OpportunityDetector
 from screener.implications import ImplicationDetector, ImplicationMatcher
 from screener.kalshi import KalshiClient
@@ -341,11 +341,10 @@ class CrossVenueScreenerApp:
 
         LOGGER.info("stage=discovery_start venue=polymarket")
         polymarket_markets = await self.polymarket.discover_markets()
-        polymarket_markets = sorted(
+        polymarket_markets = self._select_polymarket_markets(
             polymarket_markets,
-            key=lambda market: (market.volume, market.liquidity),
-            reverse=True,
-        )[: self.settings.cross_venue_max_polymarket_markets]
+            limit=self.settings.cross_venue_max_polymarket_markets,
+        )
         LOGGER.info("stage=discovery_done venue=polymarket markets=%s", len(polymarket_markets))
         self._log_polymarket_samples(polymarket_markets)
 
@@ -531,6 +530,35 @@ class CrossVenueScreenerApp:
                 market.volume,
                 market.question[:180],
             )
+
+    def _select_polymarket_markets(self, markets: list[Market], limit: int) -> list[Market]:
+        selected: dict[str, Market] = {}
+
+        def add(items: list[Market], count: int) -> None:
+            for market in items:
+                if len(selected) >= limit:
+                    break
+                if len(selected) >= count and count < limit:
+                    break
+                selected.setdefault(market.id, market)
+
+        top_by_volume = sorted(markets, key=lambda market: (market.volume, market.liquidity), reverse=True)
+        add(top_by_volume, max(1, limit // 3))
+
+        sports = [market for market in markets if _domain(market.question) == "sports"]
+        sports = sorted(sports, key=lambda market: (market.volume, market.liquidity), reverse=True)
+        target = min(limit, len(selected) + max(1, limit // 3))
+        for market in sports:
+            if len(selected) >= target:
+                break
+            selected.setdefault(market.id, market)
+
+        for market in markets:
+            if len(selected) >= limit:
+                break
+            selected.setdefault(market.id, market)
+
+        return list(selected.values())[:limit]
 
     def _log_kalshi_samples(self, markets: list) -> None:
         for index, market in enumerate(markets[: self.settings.log_market_sample_size], start=1):
