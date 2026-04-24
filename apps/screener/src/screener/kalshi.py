@@ -85,12 +85,27 @@ class KalshiClient:
                 len(markets),
                 bool(data.get("cursor")) if isinstance(data, dict) else False,
             )
+            rejected_multileg = 0
+            rejected_unpriced = 0
             for raw in raw_markets:
                 if not isinstance(raw, dict):
                     continue
                 market = self._parse_market(raw)
                 if market is not None:
                     markets.append(market)
+                    continue
+                selected_legs = raw.get("mve_selected_legs")
+                if isinstance(selected_legs, list) and len(selected_legs) > 1:
+                    rejected_multileg += 1
+                elif _decimal(raw.get("yes_ask_dollars") or raw.get("yes_ask")) <= 0:
+                    rejected_unpriced += 1
+            LOGGER.info(
+                "stage=kalshi_page_filter page=%s accepted=%s rejected_multileg=%s rejected_unpriced=%s",
+                page_number,
+                len(markets),
+                rejected_multileg,
+                rejected_unpriced,
+            )
 
             next_cursor = str(data.get("cursor") or "") if isinstance(data, dict) else ""
             if not raw_markets or not next_cursor or next_cursor == cursor:

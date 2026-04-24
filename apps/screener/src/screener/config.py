@@ -89,7 +89,7 @@ class Settings:
         self.log_level = os.getenv("LOG_LEVEL", "INFO")
 
         self.kalshi_market_limit = max(1, min(_int("KALSHI_MARKET_LIMIT", 1000), 1000))
-        self.kalshi_max_pages = max(1, min(_int("KALSHI_MAX_PAGES", 10), 20))
+        self.kalshi_max_pages = max(1, min(_int("KALSHI_MAX_PAGES", 20), 20))
         self.kalshi_include_multileg = _bool("KALSHI_INCLUDE_MULTILEG", False)
         self.cross_venue_max_polymarket_markets = max(1, _int("CROSS_VENUE_MAX_POLYMARKET_MARKETS", 250))
         self.cross_venue_max_kalshi_markets = max(1, _int("CROSS_VENUE_MAX_KALSHI_MARKETS", 250))

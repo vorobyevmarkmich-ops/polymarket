@@ -197,7 +197,7 @@ class SemanticMatcher:
         text = _response_text(data)
         parsed = json.loads(text)
         match_type = str(parsed.get("match_type") or candidate.match_type)
-        confidence = float(parsed.get("confidence") or candidate.score)
+        confidence = _confidence(parsed.get("confidence"), candidate.score)
         material_differences = parsed.get("material_differences") or []
         explanation = str(parsed.get("explanation") or "")
         reason = f"ai confidence={confidence:.2f}; {explanation}; differences={material_differences}"
@@ -314,3 +314,25 @@ def _response_text(data: dict[str, Any]) -> str:
             if isinstance(content, dict) and isinstance(content.get("text"), str):
                 chunks.append(content["text"])
     return "".join(chunks)
+
+
+def _confidence(value: Any, fallback: float) -> float:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        labels = {
+            "very high": 0.95,
+            "high": 0.85,
+            "medium": 0.60,
+            "moderate": 0.60,
+            "low": 0.30,
+            "very low": 0.10,
+        }
+        if normalized in labels:
+            return labels[normalized]
+        try:
+            return float(normalized)
+        except ValueError:
+            return fallback
+    return fallback

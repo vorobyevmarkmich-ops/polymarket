@@ -8,7 +8,7 @@ from typing import Any
 from urllib.request import Request, urlopen
 
 from screener.config import Settings
-from screener.cross_venue import _jaccard, _response_text, _terms
+from screener.cross_venue import _confidence, _jaccard, _response_text, _terms
 from screener.models import Market, PriceLevel
 
 LOGGER = logging.getLogger(__name__)
@@ -173,7 +173,7 @@ class ImplicationMatcher:
             data = json.loads(response.read().decode("utf-8"))
         parsed = json.loads(_response_text(data))
         relation_type = str(parsed.get("relation_type") or candidate.relation_type)
-        confidence = float(parsed.get("confidence") or candidate.score)
+        confidence = _confidence(parsed.get("confidence"), candidate.score)
         risks = parsed.get("material_risks") or []
         explanation = str(parsed.get("explanation") or "")
         reason = f"ai confidence={confidence:.2f}; {explanation}; risks={risks}"
