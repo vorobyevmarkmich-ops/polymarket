@@ -67,11 +67,12 @@ class KalshiClient:
             if page_number >= self.settings.kalshi_max_pages:
                 break
             page_number += 1
-            page_limit = min(200, self.settings.kalshi_market_limit - len(markets))
+            page_limit = min(1000, self.settings.kalshi_market_limit - len(markets))
             url = f"{self.settings.kalshi_api_base.rstrip('/')}/markets"
             params = {
                 "status": "open",
                 "limit": page_limit,
+                "mve_filter": "exclude",
             }
             if cursor:
                 params["cursor"] = cursor
