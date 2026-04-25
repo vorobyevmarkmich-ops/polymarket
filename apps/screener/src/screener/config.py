@@ -100,7 +100,7 @@ class Settings:
         self.cross_venue_fee_bps = _int("CROSS_VENUE_FEE_BPS", 0)
         self.exact_match_mismatch_buffer_bps = _int("EXACT_MATCH_MISMATCH_BUFFER_BPS", 100)
         self.near_match_mismatch_buffer_bps = _int("NEAR_MATCH_MISMATCH_BUFFER_BPS", 500)
-        self.allow_near_match_opportunities = _bool("ALLOW_NEAR_MATCH_OPPORTUNITIES", True)
+        self.allow_near_match_opportunities = _bool("ALLOW_NEAR_MATCH_OPPORTUNITIES", False)
         self.log_cross_venue_candidates = _bool("LOG_CROSS_VENUE_CANDIDATES", True)
         self.log_cross_venue_rejections = _bool("LOG_CROSS_VENUE_REJECTIONS", True)
 

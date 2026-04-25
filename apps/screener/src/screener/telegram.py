@@ -58,6 +58,8 @@ def _short_reason(reason: str) -> str:
         return "Детерминированная проверка: более жесткий ценовой порог логически подразумевает более мягкий."
     if reason.startswith("deterministic nested rank"):
         return "Детерминированная проверка: более высокий результат в таблице логически подразумевает более широкий top-N."
+    if reason.startswith("heuristic token overlap"):
+        return "Первичный текстовый фильтр нашел похожие слова, но такой кандидат не должен становиться сигналом без AI-подтверждения."
     confidence = re.search(r"ai confidence=([0-9.]+)", reason)
     cleaned = re.sub(r"^ai confidence=[0-9.]+;\s*", "", reason).strip()
     cleaned = re.sub(r";\s*(risks|differences)=.*$", "", cleaned).strip()

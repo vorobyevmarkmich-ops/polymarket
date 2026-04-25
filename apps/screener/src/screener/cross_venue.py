@@ -43,15 +43,19 @@ STOPWORDS = {
     "above",
     "after",
     "below",
+    "between",
     "finish",
     "game",
     "happen",
     "market",
     "match",
+    "more",
     "over",
+    "picked",
     "round",
     "season",
     "standings",
+    "than",
     "under",
     "win",
     "wins",
@@ -77,6 +81,7 @@ GENERIC_MATCH_TERMS = {
     "rate",
     "rates",
     "relegated",
+    "spread",
     "top",
     "united",
     "win",
@@ -269,7 +274,15 @@ class SemanticMatcher:
                     candidate.kalshi.ticker,
                     candidate.score,
                 )
-                refined.append(candidate)
+                refined.append(
+                    EventCandidate(
+                        polymarket=candidate.polymarket,
+                        kalshi=candidate.kalshi,
+                        score=0.0,
+                        match_type="related_not_same",
+                        reason="ai classification failed; rejected instead of using heuristic fallback",
+                    )
+                )
         refined.sort(key=lambda item: item.score, reverse=True)
         return refined
 
@@ -348,6 +361,16 @@ class CrossVenueDetector:
             if self.settings.allow_near_match_opportunities:
                 allowed_match_types.add("near_equivalent")
             if candidate.match_type not in allowed_match_types:
+                continue
+            if not _has_ai_confirmation(candidate):
+                LOGGER.info(
+                    "stage=match_rejected reason=no_ai_confirmation match=%s score=%.3f poly=%s kalshi=%s candidate_reason=%s",
+                    candidate.match_type,
+                    candidate.score,
+                    candidate.polymarket.question[:120],
+                    candidate.kalshi.title[:120],
+                    candidate.reason[:180],
+                )
                 continue
             poly_yes = polymarket_prices.get(candidate.polymarket.yes_token_id)
             poly_no = polymarket_prices.get(candidate.polymarket.no_token_id)
@@ -434,6 +457,10 @@ def _jaccard(left: set[str], right: set[str]) -> float:
 
 def _has_specific_overlap(shared_terms: set[str]) -> bool:
     return any(term not in GENERIC_MATCH_TERMS for term in shared_terms)
+
+
+def _has_ai_confirmation(candidate: EventCandidate) -> bool:
+    return candidate.reason.startswith("ai confidence=")
 
 
 def _domain(text: str) -> str:
