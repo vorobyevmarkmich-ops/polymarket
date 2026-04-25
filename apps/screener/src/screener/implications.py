@@ -45,6 +45,21 @@ class ImplicationOpportunity:
         )
 
 
+@dataclass(frozen=True)
+class ImplicationNearMiss:
+    candidate: ImplicationCandidate
+    premise_yes_price: Decimal
+    consequence_yes_ask: Decimal
+    estimated_fees: Decimal
+    implication_buffer: Decimal
+    net_edge: Decimal
+    rejection_reason: str
+
+    @property
+    def net_edge_bps(self) -> int:
+        return int(self.net_edge * Decimal("10000"))
+
+
 class ImplicationMatcher:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -262,6 +277,66 @@ class ImplicationDetector:
                 opportunities.append(opportunity)
 
         return sorted(opportunities, key=lambda item: item.net_edge, reverse=True)
+
+    def near_misses(
+        self,
+        candidates: list[ImplicationCandidate],
+        prices: dict[str, PriceLevel],
+    ) -> list[ImplicationNearMiss]:
+        rows: list[ImplicationNearMiss] = []
+        valid_relations = {"strict_implication"}
+        if self.settings.near_miss_include_likely_implications:
+            valid_relations.update({"likely_implication", "equivalent"})
+        if self.settings.allow_heuristic_implications:
+            valid_relations.add("possible_implication")
+
+        min_anchor = Decimal(self.settings.implication_min_anchor_yes_bps) / Decimal("10000")
+        near_anchor = Decimal(self.settings.near_miss_min_anchor_yes_bps) / Decimal("10000")
+        min_edge_bps = self.settings.implication_min_edge_bps
+        near_edge_bps = self.settings.near_miss_min_edge_bps
+
+        for candidate in candidates:
+            if candidate.relation_type not in valid_relations:
+                continue
+            premise_yes = prices.get(candidate.premise.yes_token_id)
+            consequence_yes = prices.get(candidate.consequence.yes_token_id)
+            if premise_yes is None or consequence_yes is None:
+                continue
+
+            opportunity = self._build(candidate, premise_yes.ask_price, consequence_yes.ask_price)
+            reasons: list[str] = []
+            if candidate.relation_type != "strict_implication":
+                reasons.append("relation_not_strict")
+            if premise_yes.ask_price < min_anchor:
+                reasons.append("anchor_below_threshold")
+            if opportunity.net_edge_bps < min_edge_bps:
+                reasons.append("edge_below_threshold")
+            if not reasons:
+                continue
+            if premise_yes.ask_price < near_anchor and opportunity.net_edge_bps < near_edge_bps:
+                continue
+
+            rows.append(
+                ImplicationNearMiss(
+                    candidate=candidate,
+                    premise_yes_price=opportunity.premise_yes_price,
+                    consequence_yes_ask=opportunity.consequence_yes_ask,
+                    estimated_fees=opportunity.estimated_fees,
+                    implication_buffer=opportunity.implication_buffer,
+                    net_edge=opportunity.net_edge,
+                    rejection_reason=";".join(reasons),
+                )
+            )
+
+        rows.sort(
+            key=lambda item: (
+                item.candidate.relation_type == "strict_implication",
+                item.net_edge,
+                item.premise_yes_price,
+            ),
+            reverse=True,
+        )
+        return rows[: self.settings.near_miss_max_per_cycle]
 
     def _build(
         self,

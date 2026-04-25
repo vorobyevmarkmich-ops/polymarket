@@ -378,10 +378,13 @@ class CrossVenueScreenerApp:
         LOGGER.info("stage=opportunity_detection_start candidates=%s", len(candidates))
         all_direction_count = len(candidates) * 2
         opportunities = self.detector.detect(candidates, prices)
+        near_misses = self.detector.near_misses(candidates, prices) if self.settings.near_miss_enabled else []
+        self.storage.save_cross_venue_near_misses(near_misses)
         LOGGER.info(
-            "stage=opportunity_detection_done candidate_directions=%s opportunities=%s",
+            "stage=opportunity_detection_done candidate_directions=%s opportunities=%s near_misses=%s",
             all_direction_count,
             len(opportunities),
+            len(near_misses),
         )
         self._log_opportunity_rejections(candidates, prices)
 
@@ -453,7 +456,17 @@ class CrossVenueScreenerApp:
         LOGGER.info("stage=implication_matching_done candidates=%s", len(candidates))
         self._log_implication_candidates(candidates, prices)
         opportunities = self.implication_detector.detect(candidates, prices)
-        LOGGER.info("stage=implication_detection_done opportunities=%s", len(opportunities))
+        near_misses = (
+            self.implication_detector.near_misses(candidates, prices)
+            if self.settings.near_miss_enabled
+            else []
+        )
+        self.storage.save_implication_near_misses(near_misses)
+        LOGGER.info(
+            "stage=implication_detection_done opportunities=%s near_misses=%s",
+            len(opportunities),
+            len(near_misses),
+        )
         for opportunity in opportunities[: self.settings.max_alerts_per_cycle]:
             self.storage.save_implication_opportunity(opportunity)
             LOGGER.info(

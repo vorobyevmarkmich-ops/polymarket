@@ -199,6 +199,25 @@ class CrossVenueOpportunity:
         )
 
 
+@dataclass(frozen=True)
+class CrossVenueNearMiss:
+    candidate: EventCandidate
+    direction: str
+    buy_yes_venue: str
+    buy_yes_price: Decimal
+    buy_no_venue: str
+    buy_no_price: Decimal
+    total_cost: Decimal
+    estimated_fees: Decimal
+    mismatch_buffer: Decimal
+    net_edge: Decimal
+    rejection_reason: str
+
+    @property
+    def net_edge_bps(self) -> int:
+        return int(self.net_edge * Decimal("10000"))
+
+
 class SemanticMatcher:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -389,6 +408,55 @@ class CrossVenueDetector:
             if item.net_edge_bps >= self.settings.cross_venue_min_net_edge_bps
         ]
         return sorted(opportunities, key=lambda item: item.net_edge, reverse=True)
+
+    def near_misses(
+        self,
+        candidates: list[EventCandidate],
+        polymarket_prices: dict[str, PriceLevel],
+    ) -> list[CrossVenueNearMiss]:
+        rows: list[CrossVenueNearMiss] = []
+        min_edge_bps = self.settings.cross_venue_min_net_edge_bps
+        near_edge_bps = self.settings.near_miss_min_edge_bps
+        for candidate in candidates:
+            if candidate.match_type == "exact_equivalent":
+                rejection_reason = ""
+            elif candidate.match_type == "near_equivalent":
+                rejection_reason = "near_match_not_allowed"
+            else:
+                continue
+
+            if not _has_ai_confirmation(candidate):
+                continue
+
+            poly_yes = polymarket_prices.get(candidate.polymarket.yes_token_id)
+            poly_no = polymarket_prices.get(candidate.polymarket.no_token_id)
+            if poly_yes is None or poly_no is None:
+                continue
+
+            for opportunity in self._directions(candidate, poly_yes.ask_price, poly_no.ask_price):
+                reason = rejection_reason
+                if opportunity.net_edge_bps < min_edge_bps:
+                    reason = "edge_below_threshold" if not reason else f"{reason};edge_below_threshold"
+                if not reason or opportunity.net_edge_bps < near_edge_bps:
+                    continue
+                rows.append(
+                    CrossVenueNearMiss(
+                        candidate=candidate,
+                        direction=opportunity.direction,
+                        buy_yes_venue=opportunity.buy_yes_venue,
+                        buy_yes_price=opportunity.buy_yes_price,
+                        buy_no_venue=opportunity.buy_no_venue,
+                        buy_no_price=opportunity.buy_no_price,
+                        total_cost=opportunity.total_cost,
+                        estimated_fees=opportunity.estimated_fees,
+                        mismatch_buffer=opportunity.mismatch_buffer,
+                        net_edge=opportunity.net_edge,
+                        rejection_reason=reason,
+                    )
+                )
+
+        rows.sort(key=lambda item: item.net_edge, reverse=True)
+        return rows[: self.settings.near_miss_max_per_cycle]
 
     def _directions(
         self,

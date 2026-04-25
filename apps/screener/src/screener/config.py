@@ -103,6 +103,11 @@ class Settings:
         self.allow_near_match_opportunities = _bool("ALLOW_NEAR_MATCH_OPPORTUNITIES", False)
         self.log_cross_venue_candidates = _bool("LOG_CROSS_VENUE_CANDIDATES", True)
         self.log_cross_venue_rejections = _bool("LOG_CROSS_VENUE_REJECTIONS", True)
+        self.near_miss_enabled = _bool("NEAR_MISS_ENABLED", True)
+        self.near_miss_max_per_cycle = max(1, _int("NEAR_MISS_MAX_PER_CYCLE", 50))
+        self.near_miss_min_edge_bps = _int("NEAR_MISS_MIN_EDGE_BPS", -500)
+        self.near_miss_min_anchor_yes_bps = _int("NEAR_MISS_MIN_ANCHOR_YES_BPS", 7500)
+        self.near_miss_include_likely_implications = _bool("NEAR_MISS_INCLUDE_LIKELY_IMPLICATIONS", True)
 
         self.implication_max_markets = max(1, _int("IMPLICATION_MAX_MARKETS", 1000))
         self.implication_max_candidates = max(1, _int("IMPLICATION_MAX_CANDIDATES", 20))
